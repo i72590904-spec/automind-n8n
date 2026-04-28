@@ -1,0 +1,396 @@
+{
+  "name": "01 — Booking Bot (Telegram → Postgres)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "trigger-telegram",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1100,
+        0
+      ],
+      "webhookId": "automind-booking-bot",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Парсим Telegram-апдейт в общий формат: { chatId, type, text, payload, user }\n// type: 'command' | 'text' | 'callback'\nconst raw = $input.first().json;\n\nlet chatId, fromUser, type, text = null, payload = null, callbackQueryId = null, messageId = null;\n\nif (raw.message) {\n  chatId = raw.message.chat.id;\n  fromUser = raw.message.from;\n  messageId = raw.message.message_id;\n  text = (raw.message.text || '').trim();\n  if (text.startsWith('/')) {\n    type = 'command';\n    payload = text.split(/\\s+/)[0].toLowerCase();\n  } else {\n    type = 'text';\n  }\n} else if (raw.callback_query) {\n  chatId = raw.callback_query.message.chat.id;\n  fromUser = raw.callback_query.from;\n  messageId = raw.callback_query.message.message_id;\n  callbackQueryId = raw.callback_query.id;\n  type = 'callback';\n  payload = raw.callback_query.data;\n  text = payload;\n} else {\n  // не интересующий апдейт — отдаём пустой объект, дальше можно отфильтровать\n  return [{ json: { skip: true } }];\n}\n\nreturn [{\n  json: {\n    skip: false,\n    chatId,\n    type,\n    text,\n    payload,\n    callbackQueryId,\n    messageId,\n    user: {\n      id: fromUser.id,\n      username: fromUser.username || null,\n      firstName: fromUser.first_name || null,\n      lastName: fromUser.last_name || null,\n      fullName: [fromUser.first_name, fromUser.last_name].filter(Boolean).join(' ') || null,\n    },\n  },\n}];\n"
+      },
+      "id": "code-parse",
+      "name": "Parse Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-not-skip",
+      "name": "If valid update",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO clients (tg_chat_id, tg_username, full_name)\nVALUES ($1, $2, $3)\nON CONFLICT (tg_chat_id) DO UPDATE\n   SET tg_username = COALESCE(EXCLUDED.tg_username, clients.tg_username),\n       full_name   = COALESCE(EXCLUDED.full_name,   clients.full_name),\n       updated_at  = NOW()\nRETURNING id, tg_chat_id, tg_username, full_name, phone;",
+        "options": {
+          "queryReplacement": "={{ $json.chatId }}, {{ $json.user.username }}, {{ $json.user.fullName }}"
+        }
+      },
+      "id": "pg-upsert-client",
+      "name": "Upsert Client",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT step, draft\n  FROM conversation_state\n WHERE tg_chat_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Parse Update').item.json.chatId }}"
+        }
+      },
+      "id": "pg-get-state",
+      "name": "Get State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, code, title, duration_min, price_rub\n  FROM services\n WHERE is_active = TRUE\n ORDER BY sort_order, id;",
+        "options": {}
+      },
+      "id": "pg-services",
+      "name": "Get Services",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// =============================================================================\n// State machine бронирования.\n// Вход:\n//   - $('Parse Update').first().json    — событие\n//   - $('Upsert Client').first().json   — { id, tg_chat_id, ... }\n//   - $('Get State').all()              — [{ step, draft }] или []\n//   - $('Get Services').all()           — список услуг\n// Выход:\n//   {\n//     chatId, callbackQueryId, replyText, replyKeyboard,\n//     nextStep, draft,\n//     bookingToSave: null | { client_id, service_id, starts_at, ends_at }\n//   }\n// =============================================================================\nconst evt = $('Parse Update').first().json;\nconst client = $('Upsert Client').first().json;\nconst stateRows = $('Get State').all().map(i => i.json);\nconst services = $('Get Services').all().map(i => i.json);\n\nconst current = stateRows[0] || { step: 'idle', draft: {} };\nlet step = current.step || 'idle';\nlet draft = (current.draft && typeof current.draft === 'object') ? { ...current.draft } : {};\n\nconst out = {\n  chatId: evt.chatId,\n  callbackQueryId: evt.callbackQueryId,\n  replyText: '',\n  replyKeyboard: null,\n  nextStep: step,\n  draft,\n  bookingToSave: null,\n};\n\nfunction servicesKeyboard() {\n  const rows = services.map(s => ([{\n    text: `${s.title} — ${s.price_rub ? s.price_rub + '₽' : ''}`.trim(),\n    callback_data: `svc:${s.id}`,\n  }]));\n  return { inline_keyboard: rows };\n}\n\nfunction datesKeyboard() {\n  // Ближайшие 7 дней\n  const days = [];\n  const now = new Date();\n  for (let i = 0; i < 7; i++) {\n    const d = new Date(now);\n    d.setDate(now.getDate() + i);\n    const iso = d.toISOString().slice(0, 10);\n    const label = d.toLocaleDateString('ru-RU', { weekday: 'short', day: '2-digit', month: '2-digit' });\n    days.push({ text: label, callback_data: `date:${iso}` });\n  }\n  // По 2 в ряд\n  const rows = [];\n  for (let i = 0; i < days.length; i += 2) rows.push(days.slice(i, i + 2));\n  return { inline_keyboard: rows };\n}\n\nfunction timesKeyboard() {\n  // Слоты 10:00–20:00 шаг 30 мин\n  const slots = [];\n  for (let h = 10; h < 20; h++) {\n    for (const m of [0, 30]) {\n      const hh = String(h).padStart(2, '0');\n      const mm = String(m).padStart(2, '0');\n      slots.push({ text: `${hh}:${mm}`, callback_data: `time:${hh}:${mm}` });\n    }\n  }\n  const rows = [];\n  for (let i = 0; i < slots.length; i += 4) rows.push(slots.slice(i, i + 4));\n  return { inline_keyboard: rows };\n}\n\nfunction reset() {\n  step = 'idle';\n  draft = {};\n}\n\n// --- Команды (имеют приоритет над текущим шагом) ---\nif (evt.type === 'command') {\n  if (evt.payload === '/start' || evt.payload === '/help') {\n    out.replyText =\n      'Привет! Я бот записи.\\n\\n' +\n      'Команды:\\n' +\n      '/book — записаться\\n' +\n      '/my   — мои записи\\n' +\n      '/cancel — отменить текущее действие';\n    reset();\n    out.nextStep = step; out.draft = draft;\n    return [{ json: out }];\n  }\n  if (evt.payload === '/cancel') {\n    reset();\n    out.replyText = 'Окей, всё отменил. Чтобы начать заново — /book';\n    out.nextStep = step; out.draft = draft;\n    return [{ json: out }];\n  }\n  if (evt.payload === '/book') {\n    step = 'choose_service';\n    draft = {};\n    out.replyText = 'Какая услуга интересует?';\n    out.replyKeyboard = servicesKeyboard();\n    out.nextStep = step; out.draft = draft;\n    return [{ json: out }];\n  }\n  if (evt.payload === '/my') {\n    out.replyText = 'Твои записи я покажу в следующем шаге (TODO: SELECT из bookings).';\n    out.nextStep = step; out.draft = draft;\n    return [{ json: out }];\n  }\n  out.replyText = 'Не понял команду. Напиши /help';\n  out.nextStep = step; out.draft = draft;\n  return [{ json: out }];\n}\n\n// --- Машина состояний ---\nswitch (step) {\n  case 'idle': {\n    out.replyText = 'Чтобы записаться, отправь /book';\n    break;\n  }\n  case 'choose_service': {\n    if (evt.type === 'callback' && evt.payload && evt.payload.startsWith('svc:')) {\n      const sid = parseInt(evt.payload.slice(4), 10);\n      const svc = services.find(s => Number(s.id) === sid);\n      if (!svc) {\n        out.replyText = 'Не нашёл такую услугу. Выбери ещё раз:';\n        out.replyKeyboard = servicesKeyboard();\n        break;\n      }\n      draft.service_id = svc.id;\n      draft.service_title = svc.title;\n      draft.duration_min = svc.duration_min;\n      step = 'choose_date';\n      out.replyText = `Услуга: ${svc.title}\\nВыбери дату:`;\n      out.replyKeyboard = datesKeyboard();\n    } else {\n      out.replyText = 'Нажми кнопку с услугой:';\n      out.replyKeyboard = servicesKeyboard();\n    }\n    break;\n  }\n  case 'choose_date': {\n    if (evt.type === 'callback' && evt.payload && evt.payload.startsWith('date:')) {\n      draft.date = evt.payload.slice(5);\n      step = 'choose_time';\n      out.replyText = `Дата: ${draft.date}\\nВыбери время:`;\n      out.replyKeyboard = timesKeyboard();\n    } else {\n      out.replyText = 'Нажми кнопку с датой:';\n      out.replyKeyboard = datesKeyboard();\n    }\n    break;\n  }\n  case 'choose_time': {\n    if (evt.type === 'callback' && evt.payload && evt.payload.startsWith('time:')) {\n      draft.time = evt.payload.slice(5);\n      step = 'enter_name';\n      const hasName = client.full_name;\n      if (hasName) {\n        out.replyText = `Записаться как «${client.full_name}»? Если да — напиши \"да\". Иначе пришли своё ФИО.`;\n      } else {\n        out.replyText = 'Как тебя зовут? (ФИО)';\n      }\n    } else {\n      out.replyText = 'Нажми кнопку со временем:';\n      out.replyKeyboard = timesKeyboard();\n    }\n    break;\n  }\n  case 'enter_name': {\n    if (evt.type === 'text' && evt.text) {\n      const text = evt.text.trim();\n      if (text.toLowerCase() === 'да' && client.full_name) {\n        draft.full_name = client.full_name;\n      } else {\n        draft.full_name = text;\n      }\n      step = 'enter_phone';\n      if (client.phone) {\n        out.replyText = `Подтвердить телефон ${client.phone}? \"да\" / новый номер.`;\n      } else {\n        out.replyText = 'Оставь номер телефона (формат +7XXXXXXXXXX)';\n      }\n    } else {\n      out.replyText = 'Напиши имя текстом';\n    }\n    break;\n  }\n  case 'enter_phone': {\n    if (evt.type !== 'text' || !evt.text) {\n      out.replyText = 'Напиши номер текстом';\n      break;\n    }\n    let phone = evt.text.trim();\n    if (phone.toLowerCase() === 'да' && client.phone) phone = client.phone;\n    const digits = phone.replace(/\\D/g, '');\n    if (digits.length < 10) {\n      out.replyText = 'Номер выглядит коротким. Пришли в формате +7XXXXXXXXXX';\n      break;\n    }\n    draft.phone = phone;\n\n    // Считаем starts_at / ends_at\n    const [hh, mm] = draft.time.split(':').map(Number);\n    const starts = new Date(`${draft.date}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);\n    const ends = new Date(starts.getTime() + (draft.duration_min || 60) * 60 * 1000);\n\n    out.bookingToSave = {\n      client_id: client.id,\n      service_id: draft.service_id,\n      starts_at: starts.toISOString(),\n      ends_at: ends.toISOString(),\n      full_name: draft.full_name,\n      phone: draft.phone,\n    };\n    out.replyText =\n      `Готово! Записал тебя:\\n` +\n      `• Услуга: ${draft.service_title}\\n` +\n      `• Дата: ${draft.date} ${draft.time}\\n` +\n      `• Имя: ${draft.full_name}\\n` +\n      `• Телефон: ${draft.phone}\\n\\n` +\n      `За день и за час пришлю напоминание. Чтобы отменить — /cancel.`;\n    reset();\n    break;\n  }\n  default: {\n    out.replyText = 'Что-то пошло не так. Напиши /book чтобы начать заново.';\n    reset();\n  }\n}\n\nout.nextStep = step;\nout.draft = draft;\nreturn [{ json: out }];\n"
+      },
+      "id": "code-state-machine",
+      "name": "State Machine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversation_state (tg_chat_id, step, draft, updated_at)\nVALUES ($1, $2, $3::jsonb, NOW())\nON CONFLICT (tg_chat_id) DO UPDATE\n   SET step = EXCLUDED.step,\n       draft = EXCLUDED.draft,\n       updated_at = NOW();",
+        "options": {
+          "queryReplacement": "={{ $json.chatId }}, {{ $json.nextStep }}, {{ JSON.stringify($json.draft) }}"
+        }
+      },
+      "id": "pg-save-state",
+      "name": "Save State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-booking",
+              "leftValue": "={{ $json.bookingToSave }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-booking",
+      "name": "If has booking",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH upd AS (\n  UPDATE clients\n     SET full_name = COALESCE($4, full_name),\n         phone     = COALESCE($5, phone),\n         updated_at = NOW()\n   WHERE id = $1\n)\nINSERT INTO bookings (client_id, service_id, starts_at, ends_at, status)\nVALUES ($1, $2, $3::timestamptz, $6::timestamptz, 'confirmed')\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ $json.bookingToSave.client_id }}, {{ $json.bookingToSave.service_id }}, {{ $json.bookingToSave.starts_at }}, {{ $json.bookingToSave.full_name }}, {{ $json.bookingToSave.phone }}, {{ $json.bookingToSave.ends_at }}"
+        }
+      },
+      "id": "pg-save-booking",
+      "name": "Save Booking",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('State Machine').item.json.chatId }}",
+        "text": "={{ $('State Machine').item.json.replyText }}",
+        "additionalFields": {
+          "reply_markup": "={{ $('State Machine').item.json.replyKeyboard ? JSON.stringify($('State Machine').item.json.replyKeyboard) : '' }}"
+        }
+      },
+      "id": "tg-send",
+      "name": "Send Telegram Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Update": {
+      "main": [
+        [
+          {
+            "node": "If valid update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If valid update": {
+      "main": [
+        [
+          {
+            "node": "Upsert Client",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Upsert Client": {
+      "main": [
+        [
+          {
+            "node": "Get State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get State": {
+      "main": [
+        [
+          {
+            "node": "Get Services",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Services": {
+      "main": [
+        [
+          {
+            "node": "State Machine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "State Machine": {
+      "main": [
+        [
+          {
+            "node": "Save State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save State": {
+      "main": [
+        [
+          {
+            "node": "If has booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If has booking": {
+      "main": [
+        [
+          {
+            "node": "Save Booking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Booking": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "booking"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
