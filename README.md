@@ -39,8 +39,13 @@
 4. **`11-obsidian-search-notes.json`** — sub-workflow: simple search по Vault.
 5. **`12-obsidian-write-note.json`** — sub-workflow: запись/перезапись заметки + автоматический git commit.
 6. **`13-obsidian-git-commit.json`** — sub-workflow: коммит в ветку `ai-staging` репозитория Vault.
+7. **`20-ai-booking-helper.json`** — AI-агент на Telegram (free-text → услуга/дата/время).
+8. **`20a/20b/20c-tool-*.json`** — sub-workflow tools для AI-агента (list_services, start_booking, escalate).
+9. **`21-vk-lead-parser.json`** — Cron 6h, парсер ВК групп по нишам в таблицу `leads`.
+10. **`22-ai-first-contact.json`** — Cron 1h, AI генерирует первое сообщение → драфт в Telegram команды.
+11. **`23-rag-sync.json`** — Cron 30 мин, индексация Obsidian заметок в pgvector через OpenAI embeddings.
 
-Дальше будут добавлены: парсер ВК, AI-первый контакт, CRM-интеграция, Супервайзер, дашборд (см. [Дорожную карту](#дорожная-карта)).
+Дальше будут добавлены: Супервайзер с мульти-агентами, дашборд (см. [Дорожную карту](#дорожная-карта)).
 
 ---
 
@@ -273,8 +278,8 @@ automind-n8n/
 | 1    | n8n + Postgres + Telegram, бот записи и напоминания     | ✅ Done        |
 | 2    | Obsidian Local REST API + структурированная база знаний | ✅ Done        |
 | 3    | Git-интеграция AI-агента (ветка `ai-staging`)           | ✅ Done        |
-| 4    | Базовый AI-агент + RAG (Supabase pgvector)              | ⏳ Следующий  |
-| 5    | Супервайзер + мульти-агенты                             | 📅 Планируем  |
+| 4    | AI-агент booking + парсер ВК + AI-аутрич + RAG (pgvector) | ✅ Done        |
+| 5    | Супервайзер + мульти-агенты                             | ⏳ Следующий  |
 | 6    | Логи (Loki) + дашборд (Grafana) + Opik для AI-trace     | 📅 Планируем  |
 
 ---

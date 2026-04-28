@@ -1,0 +1,389 @@
+{
+  "name": "23 — RAG Sync (Obsidian → pgvector)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Каждые 30 минут",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.OBSIDIAN_API_URL }}/vault/_AI/",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "http-list",
+      "name": "List _AI/ files",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1580,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OBSIDIAN_CRED_ID",
+          "name": "Obsidian Local REST API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Local REST API возвращает { files: ['file1.md', 'subdir/'] }\nconst body = $input.first().json;\nconst base = '_AI/';\nconst entries = (body.files || []).filter(f => f.endsWith('.md'));\nreturn entries.map(f => ({ json: { path: base + f } }));\n"
+      },
+      "id": "code-flatten",
+      "name": "Flatten Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.OBSIDIAN_API_URL }}/vault/{{ $json.path.split('/').map(encodeURIComponent).join('/') }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.olrapi.note+json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "http-get",
+      "name": "Read Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1140,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OBSIDIAN_CRED_ID",
+          "name": "Obsidian Local REST API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Считаем хеш контента + чанкуем по абзацам.\nconst crypto = require('crypto');\nconst path = $('Flatten Files').item.json.path;\nconst note = $input.first().json;\nconst content = note.content || '';\nconst hash = crypto.createHash('sha256').update(content).digest('hex');\n\n// Чанки: разбиваем по двойному переносу, склеиваем мелкие в окна ~800 символов.\nconst paragraphs = content.split(/\\n\\s*\\n/).map(s => s.trim()).filter(Boolean);\nconst chunks = [];\nlet buf = '';\nfor (const p of paragraphs) {\n  if ((buf + '\\n\\n' + p).length > 800 && buf) {\n    chunks.push(buf);\n    buf = p;\n  } else {\n    buf = buf ? buf + '\\n\\n' + p : p;\n  }\n}\nif (buf) chunks.push(buf);\n\nreturn [{\n  json: {\n    path,\n    content,\n    content_hash: hash,\n    frontmatter: note.frontmatter || {},\n    tags: note.tags || [],\n    chunks,\n  }\n}];\n"
+      },
+      "id": "code-chunk",
+      "name": "Chunk Note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH up AS (\n  INSERT INTO notes (path, content_hash, content, frontmatter, tags, updated_at)\n  VALUES ($1, $2, $3, $4::jsonb, $5::text[], NOW())\n  ON CONFLICT (path) DO UPDATE\n    SET content_hash = EXCLUDED.content_hash,\n        content = EXCLUDED.content,\n        frontmatter = EXCLUDED.frontmatter,\n        tags = EXCLUDED.tags,\n        updated_at = NOW()\n  RETURNING id, content_hash, indexed_at\n)\nSELECT id, (indexed_at IS NULL OR indexed_at < NOW() - INTERVAL '1 second') AS need_reindex FROM up;",
+        "options": {
+          "queryReplacement": "={{ [$json.path, $json.content_hash, $json.content, JSON.stringify($json.frontmatter), '{' + $json.tags.map(t => '\"' + t.replace(/\"/g, '\\\\\"') + '\"').join(',') + '}'] }}"
+        }
+      },
+      "id": "pg-upsert-note",
+      "name": "Upsert Note",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -700,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "need_reindex",
+              "leftValue": "={{ $json.need_reindex }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-reindex",
+      "name": "If need reindex",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Превращаем чанки в строки для embeddings batch.\nconst noteId = $input.first().json.id;\nconst chunks = $('Chunk Note').item.json.chunks;\nreturn chunks.map((c, idx) => ({ json: { note_id: noteId, chunk_idx: idx, content: c } }));\n"
+      },
+      "id": "code-explode",
+      "name": "Explode Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "embedding",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "text-embedding-3-small"
+        },
+        "input": "={{ $json.content }}",
+        "options": {}
+      },
+      "id": "openai-embed",
+      "name": "OpenAI Embedding",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [
+        -40,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CRED_ID",
+          "name": "OpenAI — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM note_chunks WHERE note_id = $1::int AND chunk_idx = $2::int;\nINSERT INTO note_chunks (note_id, chunk_idx, content, embedding) VALUES ($1::int, $2::int, $3, $4::vector);",
+        "options": {
+          "queryReplacement": "={{ [$('Explode Chunks').item.json.note_id, $('Explode Chunks').item.json.chunk_idx, $('Explode Chunks').item.json.content, '[' + $json.data[0].embedding.join(',') + ']'] }}"
+        }
+      },
+      "id": "pg-upsert-chunk",
+      "name": "Upsert Chunk",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        180,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE notes SET indexed_at = NOW() WHERE id = $1::int;",
+        "options": {
+          "queryReplacement": "={{ [$('Explode Chunks').item.json.note_id] }}"
+        }
+      },
+      "id": "pg-mark-indexed",
+      "name": "Mark Indexed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        400,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Каждые 30 минут": {
+      "main": [
+        [
+          {
+            "node": "List _AI/ files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List _AI/ files": {
+      "main": [
+        [
+          {
+            "node": "Flatten Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Files": {
+      "main": [
+        [
+          {
+            "node": "Read Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Note": {
+      "main": [
+        [
+          {
+            "node": "Chunk Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Note": {
+      "main": [
+        [
+          {
+            "node": "Upsert Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Note": {
+      "main": [
+        [
+          {
+            "node": "If need reindex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If need reindex": {
+      "main": [
+        [
+          {
+            "node": "Explode Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Explode Chunks": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Embedding": {
+      "main": [
+        [
+          {
+            "node": "Upsert Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Chunk": {
+      "main": [
+        [
+          {
+            "node": "Mark Indexed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "rag"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

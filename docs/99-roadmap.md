@@ -26,14 +26,14 @@
 - [x] Защита `main` — через GitHub Branch Protection (настраивается вручную).
 - [x] Метрика `commit` пишется в таблицу `metrics` после каждого пуша.
 
-## Фаза 4 — AI-команда (базовая)
+## Фаза 4 — AI-команда (базовая) ✅
 
-- [ ] Workflow `20 — AI Agent (Booking Helper)` — отвечает на свободный текст,
-  понимает «запиши на завтра в 16:00 на стрижку» через function calling.
-- [ ] Workflow `21 — VK Lead Parser` — парсит группы/паблики, складывает в `leads`.
-- [ ] Workflow `22 — AI First Contact` — пишет первое сообщение лидам.
-- [ ] Workflow `23 — RAG Sync` — Obsidian → Supabase pgvector (chunking + embeddings).
-- [ ] Документация: как добавлять нового AI-агента (шаблон).
+- [x] Workflow `20 — AI Booking Helper` + tools `20a/b/c` (list_services, start_booking, escalate).
+- [x] Workflow `21 — VK Lead Parser` (groups.search по 6 нишам, апсерт в `leads`).
+- [x] Workflow `22 — AI First Contact` (cron каждый час, AI-драфт → Telegram команды).
+- [x] Workflow `23 — RAG Sync` — Obsidian → локальный pgvector (chunking + embeddings).
+- [x] Migration `02-rag.sql` — pgvector extension, таблицы `notes`, `note_chunks`, `outreach_messages`, `ai_sessions`.
+- [x] Документация: `docs/06-phase4-ai-rag.md`.
 
 ## Фаза 5 — Мульти-агенты с Супервайзером
 

@@ -1,0 +1,370 @@
+{
+  "name": "20 — AI Booking Helper (Telegram fallback)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "trigger-tg",
+      "name": "Telegram Trigger (free-text)",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1200,
+        0
+      ],
+      "webhookId": "automind-ai-booking-helper",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Берём только свободный текст. Команды и callbacks обрабатывает workflow 01.\nconst raw = $input.first().json;\nif (!raw.message || !raw.message.text) return [{ json: { skip: true } }];\nconst text = raw.message.text.trim();\nif (text.startsWith('/')) return [{ json: { skip: true } }];\n\nreturn [{\n  json: {\n    skip: false,\n    chatId: raw.message.chat.id,\n    sessionKey: `telegram:${raw.message.chat.id}`,\n    text,\n    user: raw.message.from,\n    now: new Date().toISOString(),\n  }\n}];\n"
+      },
+      "id": "code-prepare",
+      "name": "Prepare Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "skip",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-not-skip",
+      "name": "If free text",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "Ты — AI-ассистент по записи в салон/барбершоп/студию.\nДоступные услуги ищи через tool list_services.\nЕсли клиент явно просит записаться — собери service_code, date (YYYY-MM-DD), time (HH:MM) и вызови start_booking.\nЕсли клиент злится или просит человека — вызови escalate.\nТон: дружелюбный, на «ты», без канцелярита.\nТекущая дата/время: {{ $('Prepare Input').item.json.now }}\nchat_id клиента: {{ $('Prepare Input').item.json.chatId }}"
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "llm-openai",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        220
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CRED_ID",
+          "name": "OpenAI — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Prepare Input').item.json.sessionKey }}",
+        "tableName": "ai_sessions",
+        "contextWindowLength": 8
+      },
+      "id": "memory-pg",
+      "name": "Postgres Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        -480,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "list_services",
+        "description": "Возвращает список активных услуг с их кодами и длительностью. Вызывай в начале диалога, когда клиент спрашивает про услуги или цены.",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_TOOL_LIST_SERVICES_ID",
+          "mode": "id"
+        }
+      },
+      "id": "tool-list-services",
+      "name": "Tool: list_services",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.1,
+      "position": [
+        -340,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "name": "start_booking",
+        "description": "Создаёт запись для клиента. Передай service_code (string), date (YYYY-MM-DD), time (HH:MM). chat_id берётся из контекста.",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_TOOL_START_BOOKING_ID",
+          "mode": "id"
+        }
+      },
+      "id": "tool-start-booking",
+      "name": "Tool: start_booking",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.1,
+      "position": [
+        -200,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "name": "escalate",
+        "description": "Передать диалог человеку. Используй при агрессии, претензиях, неоднозначных вопросах. Параметр: reason (string).",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_TOOL_ESCALATE_ID",
+          "mode": "id"
+        }
+      },
+      "id": "tool-escalate",
+      "name": "Tool: escalate",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.1,
+      "position": [
+        -60,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Prepare Input').item.json.chatId }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {}
+      },
+      "id": "tg-send",
+      "name": "Send Telegram Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -260,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO metrics (workflow, metric, value, tags) VALUES ('20-ai-booking-helper','reply',1,$1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ chatId: $('Prepare Input').item.json.chatId, len: ($json.output||'').length }) }}"
+        }
+      },
+      "id": "pg-metric",
+      "name": "Record Metric",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        20,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger (free-text)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Input": {
+      "main": [
+        [
+          {
+            "node": "If free text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If free text": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: list_services": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: start_booking": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: escalate": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Reply": {
+      "main": [
+        [
+          {
+            "node": "Record Metric",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "ai-agent"
+    },
+    {
+      "name": "booking"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

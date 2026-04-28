@@ -1,0 +1,118 @@
+{
+  "name": "20b — Tool: start_booking",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-execute",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Вход от AI Agent: { chat_id, service_code, date (YYYY-MM-DD), time (HH:MM) }\nconst i = $input.first().json;\nconst chatId = Number(i.chat_id || i.chatId);\nconst serviceCode = String(i.service_code || '').trim();\nconst date = String(i.date || '').trim();\nconst time = String(i.time || '').trim();\n\nif (!chatId) throw new Error('chat_id required');\nif (!/^[a-z0-9_]+$/i.test(serviceCode)) throw new Error('invalid service_code');\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) throw new Error('date must be YYYY-MM-DD');\nif (!/^\\d{2}:\\d{2}$/.test(time)) throw new Error('time must be HH:MM');\n\nconst startsAt = new Date(`${date}T${time}:00`);\nif (isNaN(+startsAt)) throw new Error('invalid date/time');\nif (startsAt < new Date()) throw new Error('cannot book in the past');\n\nreturn [{\n  json: { chatId, serviceCode, startsAt: startsAt.toISOString(), date, time }\n}];\n"
+      },
+      "id": "code-validate",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH cli AS (SELECT id FROM clients WHERE tg_chat_id = $1::bigint),\n     svc AS (SELECT id, duration_min FROM services WHERE code = $2 AND is_active=TRUE),\n     ins AS (\n       INSERT INTO bookings (client_id, service_id, starts_at, ends_at, status)\n       SELECT cli.id, svc.id, $3::timestamptz, $3::timestamptz + (svc.duration_min || ' minutes')::interval, 'confirmed'\n       FROM cli, svc\n       RETURNING id, starts_at, ends_at\n     )\nSELECT id, starts_at, ends_at FROM ins;",
+        "options": {
+          "queryReplacement": "={{ [$json.chatId, $json.serviceCode, $json.startsAt] }}"
+        }
+      },
+      "id": "pg-insert",
+      "name": "Insert Booking",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -760,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (!r || !r.id) {\n  return [{ json: { ok: false, message: 'не получилось сохранить запись (клиент или услуга не найдены)' } }];\n}\nreturn [{\n  json: {\n    ok: true,\n    bookingId: r.id,\n    message: `Запись создана. Дата: ${new Date(r.starts_at).toLocaleString('ru-RU')}.`\n  }\n}];\n"
+      },
+      "id": "code-shape",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -540,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Insert Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Booking": {
+      "main": [
+        [
+          {
+            "node": "Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "ai-tool"
+    },
+    {
+      "name": "booking"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

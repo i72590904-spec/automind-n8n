@@ -1,0 +1,219 @@
+{
+  "name": "21 — VK Lead Parser",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Каждые 6 часов",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Список нишевых поисковых запросов для VK groups.search.\n// Расширяй по мере роста — это пробный набор.\nconst queries = [\n  { niche: 'barber', q: 'барбершоп' },\n  { niche: 'salon', q: 'салон красоты' },\n  { niche: 'salon', q: 'парикмахерская' },\n  { niche: 'cafe', q: 'кафе' },\n  { niche: 'clinic', q: 'стоматология' },\n  { niche: 'school', q: 'онлайн школа' },\n];\nreturn queries.map(o => ({ json: o }));\n"
+      },
+      "id": "code-queries",
+      "name": "Build Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.vk.com/method/groups.search",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.q }}"
+            },
+            {
+              "name": "type",
+              "value": "group"
+            },
+            {
+              "name": "count",
+              "value": "30"
+            },
+            {
+              "name": "fields",
+              "value": "city,description,members_count,site,contacts,activity"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.VK_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "v",
+              "value": "5.199"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "http-vk",
+      "name": "VK groups.search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Разворачиваем VK ответ в массив лидов с фильтрацией.\nconst niche = $('Build Queries').item.json.niche;\nconst body = $input.first().json;\nif (body.error) throw new Error(`VK error: ${body.error.error_msg}`);\nconst items = (body.response && body.response.items) || [];\nconst out = [];\nfor (const g of items) {\n  // Пропускаем закрытые/private и слишком мелкие группы\n  if (g.is_closed && g.is_closed !== 0) continue;\n  if ((g.members_count || 0) < 200) continue;\n  // Минимум данных для контакта\n  out.push({\n    niche,\n    external_id: String(g.id),\n    title: g.name || g.screen_name || `vk_${g.id}`,\n    url: `https://vk.com/${g.screen_name || ('club' + g.id)}`,\n    members: g.members_count || null,\n    city: g.city ? g.city.title : null,\n    description: g.description || null,\n    site: g.site || null,\n    activity: g.activity || null,\n  });\n}\nreturn out.map(j => ({ json: j }));\n"
+      },
+      "id": "code-shape",
+      "name": "Parse Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO leads (source, external_id, niche, status, metadata)\nVALUES ('vk', $1, $2, 'new', $3::jsonb)\nON CONFLICT (source, external_id) DO UPDATE\n  SET metadata = leads.metadata || EXCLUDED.metadata,\n      updated_at = NOW()\nRETURNING id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.external_id, $json.niche, JSON.stringify({ title: $json.title, url: $json.url, members: $json.members, city: $json.city, description: $json.description, site: $json.site, activity: $json.activity })] }}"
+        }
+      },
+      "id": "pg-upsert",
+      "name": "Upsert Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -540,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO metrics (workflow, metric, value, tags) VALUES ('21-vk-lead-parser','leads_processed',1,$1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ niche: $('Parse Items').item.json.niche, external_id: $('Parse Items').item.json.external_id }) }}"
+        }
+      },
+      "id": "pg-metric",
+      "name": "Record Metric",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -320,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Каждые 6 часов": {
+      "main": [
+        [
+          {
+            "node": "Build Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Queries": {
+      "main": [
+        [
+          {
+            "node": "VK groups.search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VK groups.search": {
+      "main": [
+        [
+          {
+            "node": "Parse Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Items": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead": {
+      "main": [
+        [
+          {
+            "node": "Record Metric",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "vk"
+    },
+    {
+      "name": "leads"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
