@@ -1,0 +1,141 @@
+{
+  "name": "12 — Obsidian: Write Note",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-execute",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Вход: { path, content, mode }\n// mode: 'replace' (PUT, заменит) | 'append' (POST к /vault/{path} c body)\nconst input = $input.first().json;\nif (!input.path) throw new Error('path is required');\nif (typeof input.content !== 'string') throw new Error('content must be a string');\n\n// Защита: запрет писать в _AI/, agents/, playbooks/ кроме inbox/, если режим заявлен strict.\n// Контролируется параметром allowOutsideInbox=true для административных правок.\nif (!input.allowOutsideInbox) {\n  const allowed = input.path.startsWith('_AI/inbox/');\n  if (!allowed) {\n    throw new Error(`AI may write only into _AI/inbox/* by default. Got: ${input.path}. Pass allowOutsideInbox=true to override.`);\n  }\n}\n\nreturn [{\n  json: {\n    path: input.path,\n    content: input.content,\n    mode: input.mode || 'replace',\n  }\n}];\n"
+      },
+      "id": "code-validate",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.OBSIDIAN_API_URL }}/vault/{{ $json.path.split('/').map(encodeURIComponent).join('/') }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "text/markdown"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json.content }}",
+        "options": {
+          "timeout": 15000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "http-put",
+      "name": "PUT note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OBSIDIAN_CRED_ID",
+          "name": "Obsidian Local REST API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GIT_COMMIT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "value": {
+            "message": "=AI: update {{ $('Validate Input').item.json.path }}",
+            "files": "={{ [$('Validate Input').item.json.path] }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "exec-git",
+      "name": "Trigger Git Commit",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "PUT note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PUT note": {
+      "main": [
+        [
+          {
+            "node": "Trigger Git Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "obsidian"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

@@ -9,19 +9,22 @@
 - [x] Документация по Windows-установке и Cloudflare Tunnel
 - [x] CI: валидация JSON-файлов
 
-## Фаза 2 — Obsidian как «мозг» ⏳
+## Фаза 2 — Obsidian как «мозг» ✅
 
-- [ ] Скрипт-помощник для подключения Obsidian Local REST API.
-- [ ] Workflow `10 — Obsidian Reader` (HTTP Request → читать заметку по пути).
-- [ ] Workflow `11 — Obsidian Writer` (создавать/обновлять заметку, пушить в `ai-staging`).
-- [ ] Шаблон `AI_System_Specs.md` со всеми системными промптами.
-- [ ] Документация: как структурировать Vault для AI-команды.
+- [x] Документация по подключению Local REST API (`docs/04-obsidian-setup.md`).
+- [x] Workflow `10 — Obsidian: Read Note` — чтение по path.
+- [x] Workflow `11 — Obsidian: Search Notes` — simple search.
+- [x] Workflow `12 — Obsidian: Write Note` — запись с защитой от записи вне `_AI/inbox/`.
+- [x] Шаблоны: `obsidian/_AI/AI_System_Specs.md`, `agents/booking-helper.md`, `agents/sales-manager.md`, `playbooks/lead-qualification.md`.
+- [x] Vault примонтирован в `/vault` контейнера n8n (через `OBSIDIAN_VAULT_PATH`).
 
-## Фаза 3 — Git-интеграция AI-агента ⏳
+## Фаза 3 — Git-интеграция AI-агента ✅
 
-- [ ] Sub-workflow `git_commit` — выполняет `git add/commit/push origin ai-staging` через Execute Command.
-- [ ] Защита: AI коммитит **только** в `ai-staging`, мерж в `main` — через PR вручную.
-- [ ] CI на стороне репо: блокировать прямые пуши в `main` от bot-аккаунта.
+- [x] Sub-workflow `13 — Vault Git Commit (ai-staging)` — git add/commit/push с валидацией путей.
+- [x] AI коммитит **только** в `ai-staging` — branch захардкожен в Validate Input.
+- [x] Документация по настройке Vault как git-репо (`docs/05-ai-staging-branch.md`).
+- [x] Защита `main` — через GitHub Branch Protection (настраивается вручную).
+- [x] Метрика `commit` пишется в таблицу `metrics` после каждого пуша.
 
 ## Фаза 4 — AI-команда (базовая)
 

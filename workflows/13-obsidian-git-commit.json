@@ -1,0 +1,118 @@
+{
+  "name": "13 — Vault Git Commit (ai-staging)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-execute",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Валидация входа.\nconst i = $input.first().json;\nconst message = (i.message || '').toString().trim();\nif (!message) throw new Error('commit message is required');\nif (message.length > 500) throw new Error('commit message too long');\n\n// files: массив относительных путей или пусто\nconst files = Array.isArray(i.files) ? i.files : [];\nfor (const f of files) {\n  if (typeof f !== 'string') throw new Error('files must be strings');\n  if (f.includes('..') || f.startsWith('/')) throw new Error(`unsafe path: ${f}`);\n}\n\nreturn [{\n  json: {\n    message,\n    files,\n    branch: 'ai-staging',\n  }\n}];\n"
+      },
+      "id": "code-validate",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=set -euo pipefail\ncd /vault\n\nREPO_URL=\"${VAULT_REMOTE_URL:-}\"\nTOKEN=\"${GH_TOKEN_VAULT:-}\"\nBRANCH=\"{{ $json.branch }}\"\nMSG={{ JSON.stringify($json.message) }}\n\nif [ -z \"$REPO_URL\" ] || [ -z \"$TOKEN\" ]; then\n  echo \"VAULT_REMOTE_URL and GH_TOKEN_VAULT must be provided as workflow env\"\n  exit 2\nfi\n\n# Нормализуем remote с токеном (без логирования)\nAUTHED_URL=$(printf '%s' \"$REPO_URL\" | sed -E \"s#https://#https://x-oauth-basic:${TOKEN}@#\")\n\ngit fetch \"$AUTHED_URL\" \"$BRANCH\" --depth=1 || true\ngit checkout -B \"$BRANCH\" || git checkout \"$BRANCH\"\ngit reset --mixed FETCH_HEAD 2>/dev/null || true\n\nFILES_JSON='{{ JSON.stringify($json.files) }}'\nif [ \"$FILES_JSON\" != \"[]\" ]; then\n  echo \"$FILES_JSON\" | python3 -c 'import sys,json,subprocess; [subprocess.check_call([\"git\",\"add\",\"--\",p]) for p in json.load(sys.stdin)]'\nelse\n  git add -A\nfi\n\nif git diff --cached --quiet; then\n  echo \"no changes to commit\"\n  exit 0\nfi\n\ngit -c user.email=ai@automind -c user.name='АвтоMind AI' commit -m \"$MSG\"\ngit push \"$AUTHED_URL\" \"HEAD:$BRANCH\"\necho \"pushed to $BRANCH\"\n"
+      },
+      "id": "exec-git",
+      "name": "git add/commit/push",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO metrics (workflow, metric, value, tags)\nVALUES ('13-obsidian-git-commit', 'commit', 1, $1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ branch: $('Validate Input').item.json.branch, files: $('Validate Input').item.json.files.length, ok: !$json.exitCode }) }}"
+        }
+      },
+      "id": "pg-metric",
+      "name": "Record Metric",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -320,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "git add/commit/push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "git add/commit/push": {
+      "main": [
+        [
+          {
+            "node": "Record Metric",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "obsidian"
+    },
+    {
+      "name": "git"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

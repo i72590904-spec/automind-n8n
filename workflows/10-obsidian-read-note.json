@@ -1,0 +1,109 @@
+{
+  "name": "10 — Obsidian: Read Note",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-execute",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.OBSIDIAN_API_URL }}/vault/{{ encodeURIComponent($json.path) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.olrapi.note+json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "neverError": false
+            }
+          },
+          "timeout": 10000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "http-get",
+      "name": "GET /vault/{path}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OBSIDIAN_CRED_ID",
+          "name": "Obsidian Local REST API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Возвращаем минимальный набор полей в стабильной форме.\nconst r = $input.first().json;\nreturn [{\n  json: {\n    path: r.path || $('When Executed by Another Workflow').first().json.path,\n    content: r.content || '',\n    frontmatter: r.frontmatter || {},\n    tags: r.tags || [],\n    stat: r.stat || null,\n  }\n}];\n"
+      },
+      "id": "code-shape",
+      "name": "Shape Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "GET /vault/{path}",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET /vault/{path}": {
+      "main": [
+        [
+          {
+            "node": "Shape Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "obsidian"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
