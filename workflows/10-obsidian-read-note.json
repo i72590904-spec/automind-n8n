@@ -15,7 +15,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.OBSIDIAN_API_URL }}/vault/{{ encodeURIComponent($json.path) }}",
+        "url": "={{ $env.OBSIDIAN_API_URL }}/vault/{{ $json.path.split('/').map(encodeURIComponent).join('/') }}",
         "sendHeaders": true,
         "specifyHeaders": "keypair",
         "headerParameters": {
