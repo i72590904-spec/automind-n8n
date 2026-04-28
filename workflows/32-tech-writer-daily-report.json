@@ -1,0 +1,303 @@
+{
+  "name": "32 — Tech Writer (daily report)",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "workflow_call"
+        ],
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "trigger",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "trigger-call",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Каждый день 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1600,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT COUNT(*) FROM bookings WHERE created_at >= NOW() - INTERVAL '1 day') AS bookings_new,\n  (SELECT COUNT(*) FROM bookings WHERE starts_at::date = CURRENT_DATE - 1) AS bookings_yesterday,\n  (SELECT COUNT(*) FROM leads WHERE created_at >= NOW() - INTERVAL '1 day') AS leads_new,\n  (SELECT COUNT(*) FROM leads WHERE status='qualifying' AND updated_at >= NOW() - INTERVAL '1 day') AS leads_qualifying,\n  (SELECT COUNT(*) FROM leads WHERE status='won' AND updated_at >= NOW() - INTERVAL '1 day') AS leads_won,\n  (SELECT COUNT(*) FROM outreach_messages WHERE created_at >= NOW() - INTERVAL '1 day' AND direction='out') AS outreach_sent,\n  (SELECT COUNT(*) FROM messages WHERE created_at >= NOW() - INTERVAL '1 day' AND payload ? 'escalate') AS escalations,\n  (SELECT to_char(NOW() - INTERVAL '1 day', 'YYYY-MM-DD')) AS report_date;",
+        "options": {}
+      },
+      "id": "pg-stats",
+      "name": "Collect Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1380,
+        110
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Цифры за {{ $json.report_date }}:\n- Новых записей: {{ $json.bookings_new }}\n- Записей на этот день: {{ $json.bookings_yesterday }}\n- Новых лидов: {{ $json.leads_new }}\n- В квалификации: {{ $json.leads_qualifying }}\n- Закрыто (won): {{ $json.leads_won }}\n- Аутрич отправлено: {{ $json.outreach_sent }}\n- Эскалаций к человеку: {{ $json.escalations }}\n\nСгенерируй короткий ежедневный отчёт-заметку для Obsidian Vault (markdown, без HTML).\nСтруктура:\n# Отчёт за {date}\n## Цифры (таблица)\n## Что хорошо\n## Что плохо\n## Что делать сегодня (3 пункта)\n\nКоротко, по делу, без воды. Если данных мало — отметь это и предложи что измерить.",
+        "options": {
+          "systemMessage": "Ты — Tech Writer АвтоMind. Пишешь короткие markdown-заметки в Obsidian Vault.\nТон: деловой, без эмодзи, без преамбул. Только факты и конкретные действия."
+        }
+      },
+      "id": "ai-writer",
+      "name": "Writer Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -1160,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "anthropic/claude-sonnet-4.5"
+        },
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "llm-openrouter",
+      "name": "Claude Sonnet 4.5 (OpenRouter)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1240,
+        330
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENROUTER_CRED_ID",
+          "name": "OpenRouter — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Готовим payload для workflow 12 (запись заметки в Vault).\nconst stats = $('Collect Stats').item.json;\nconst content = $json.output;\nconst path = `_AI/reports/${stats.report_date}.md`;\nreturn [{\n  json: {\n    path,\n    content: `---\\ndate: ${stats.report_date}\\ngenerated_by: 32-tech-writer\\nstats: ${JSON.stringify(stats)}\\n---\\n\\n${content}`,\n    allowOutsideInbox: true,\n    commit_message: `report: daily ${stats.report_date}`,\n  }\n}];\n"
+      },
+      "id": "code-payload",
+      "name": "Build Note Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -940,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_OBSIDIAN_WRITE_NOTE_ID"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "path": "={{ $json.path }}",
+            "content": "={{ $json.content }}",
+            "allowOutsideInbox": "={{ $json.allowOutsideInbox }}",
+            "commit_message": "={{ $json.commit_message }}"
+          }
+        }
+      },
+      "id": "exec-write",
+      "name": "Write Note (workflow 12)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        -720,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TEAM_TELEGRAM_CHAT_ID }}",
+        "text": "=📊 Дневной отчёт {{ $('Collect Stats').item.json.report_date }} готов.\nЗаметка: {{ $('Build Note Payload').item.json.path }}\n\n{{ $('Writer Agent').item.json.output }}",
+        "additionalFields": {}
+      },
+      "id": "tg-notify",
+      "name": "Notify Team",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -500,
+        110
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO metrics (workflow, metric, value, tags) VALUES ('32-tech-writer','report_generated',1,$1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ date: $('Collect Stats').item.json.report_date }) }}"
+        }
+      },
+      "id": "pg-metric",
+      "name": "Record Metric",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -280,
+        110
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Collect Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Каждый день 08:00": {
+      "main": [
+        [
+          {
+            "node": "Collect Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Stats": {
+      "main": [
+        [
+          {
+            "node": "Writer Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sonnet 4.5 (OpenRouter)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Writer Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Writer Agent": {
+      "main": [
+        [
+          {
+            "node": "Build Note Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Note Payload": {
+      "main": [
+        [
+          {
+            "node": "Write Note (workflow 12)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Note (workflow 12)": {
+      "main": [
+        [
+          {
+            "node": "Notify Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Team": {
+      "main": [
+        [
+          {
+            "node": "Record Metric",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "ai-agent"
+    },
+    {
+      "name": "reports"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

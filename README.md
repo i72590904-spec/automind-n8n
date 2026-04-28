@@ -44,8 +44,14 @@
 9. **`21-vk-lead-parser.json`** — Cron 6h, парсер ВК групп по нишам в таблицу `leads`.
 10. **`22-ai-first-contact.json`** — Cron 1h, AI генерирует первое сообщение → драфт в Telegram команды.
 11. **`23-rag-sync.json`** — Cron 30 мин, индексация Obsidian заметок в pgvector через OpenAI embeddings.
+12. **`30-supervisor.json`** — главный AI-агент команды в Telegram, маршрутизирует на под-агентов.
+13. **`31-sales-manager.json`** — sub-workflow квалификации лидов (4 вопроса, рекомендация пакета).
+14. **`32-tech-writer-daily-report.json`** — ежедневный отчёт-заметка в Obsidian Vault (cron 08:00).
+15. **`33-analytics.json`** — read-only Q&A по метрикам через SQL и RAG.
+16. **`34-tool-rag-search.json`** — общий sub-workflow для cosine-search по `note_chunks`.
+17. **`35-tool-sql-query.json`** — sub-workflow для безопасного read-only SQL.
 
-Дальше будут добавлены: Супервайзер с мульти-агентами, дашборд (см. [Дорожную карту](#дорожная-карта)).
+Дальше будут добавлены: дашборд (Grafana), логи (Loki), AI-trace (Opik) — см. [Дорожную карту](#дорожная-карта).
 
 ---
 
@@ -279,8 +285,8 @@ automind-n8n/
 | 2    | Obsidian Local REST API + структурированная база знаний | ✅ Done        |
 | 3    | Git-интеграция AI-агента (ветка `ai-staging`)           | ✅ Done        |
 | 4    | AI-агент booking + парсер ВК + AI-аутрич + RAG (pgvector) | ✅ Done        |
-| 5    | Супервайзер + мульти-агенты                             | ⏳ Следующий  |
-| 6    | Логи (Loki) + дашборд (Grafana) + Opik для AI-trace     | 📅 Планируем  |
+| 5    | Супервайзер + мульти-агенты (Sales / Analytics / Tech Writer) | ✅ Done    |
+| 6    | Логи (Loki) + дашборд (Grafana) + Opik для AI-trace     | ⏳ Следующий  |
 
 ---
 

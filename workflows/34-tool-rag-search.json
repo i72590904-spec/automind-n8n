@@ -1,0 +1,171 @@
+{
+  "name": "34 — Tool: RAG Search (pgvector)",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "workflow_call"
+        ],
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query",
+              "type": "string"
+            },
+            {
+              "name": "top_k",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "id": "trigger-call",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate input.\nconst query = ($json.query || '').toString().trim();\nif (!query) throw new Error('query is required');\nif (query.length > 1000) throw new Error('query too long (>1000 chars)');\nconst top_k = Math.max(1, Math.min(parseInt($json.top_k) || 5, 20));\nreturn [{ json: { query, top_k } }];\n"
+      },
+      "id": "code-validate",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "embedding",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "text-embedding-3-small"
+        },
+        "input": "={{ $json.query }}",
+        "options": {}
+      },
+      "id": "openai-embed",
+      "name": "Embed Query",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [
+        -760,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_EMBEDDINGS_CRED_ID",
+          "name": "OpenAI — embeddings"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT n.path, c.chunk_idx, c.content, 1 - (c.embedding <=> $1::vector) AS similarity\nFROM note_chunks c\nJOIN notes n ON n.id = c.note_id\nORDER BY c.embedding <=> $1::vector\nLIMIT $2::int;",
+        "options": {
+          "queryReplacement": "={{ ['[' + $json.data[0].embedding.join(',') + ']', $('Validate Input').item.json.top_k] }}"
+        }
+      },
+      "id": "pg-search",
+      "name": "Vector Search",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -540,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Сводим топ-K чанков в один текст для AI Agent.\nconst items = $input.all().map(i => i.json);\nif (!items.length) return [{ json: { results: 'Релевантных заметок не найдено.', count: 0 } }];\nconst formatted = items.map((r, i) => `[${i+1}] ${r.path} (similarity ${Number(r.similarity).toFixed(3)})\\n${r.content}`).join('\\n\\n---\\n\\n');\nreturn [{ json: { results: formatted, count: items.length } }];\n"
+      },
+      "id": "code-format",
+      "name": "Format Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Embed Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Query": {
+      "main": [
+        [
+          {
+            "node": "Vector Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search": {
+      "main": [
+        [
+          {
+            "node": "Format Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "rag"
+    },
+    {
+      "name": "tool"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

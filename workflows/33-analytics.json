@@ -1,0 +1,220 @@
+{
+  "name": "33 — Analytics (read-only Q&A)",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "workflow_call"
+        ],
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "question",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "trigger-call",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Вопрос команды: {{ $json.question }}\n\nИспользуй tool sql_query для извлечения данных, затем дай короткий ответ (≤ 5 строк) с конкретными числами.",
+        "options": {
+          "systemMessage": "Ты — Analytics-агент АвтоMind. Отвечаешь на вопросы команды по метрикам.\n\nДоступные таблицы и их основные колонки:\n- bookings(id, client_id, service_id, starts_at, ends_at, status, created_at, reminder_24h_sent, reminder_1h_sent)\n- leads(id, source, external_id, title, niche, city, score, status, last_action_at, metadata, created_at, updated_at)\n  status: new | contacted | qualifying | meeting | won | lost\n- outreach_messages(id, lead_id, direction, channel, text, created_at)\n- messages(id, chat_id, direction, text, payload, created_at)\n- metrics(id, workflow, metric, value, tags, recorded_at)\n- services(id, code, title, duration_min, price_rub, is_active)\n- clients(id, tg_chat_id, full_name, phone, created_at)\n\nПравила SQL:\n1. ТОЛЬКО SELECT. Никаких INSERT/UPDATE/DELETE/DDL.\n2. Всегда LIMIT 200 если нет агрегации.\n3. Используй CURRENT_DATE / NOW() для дат.\n4. Если вопрос про знания/процессы (а не цифры) — используй search_knowledge.\n5. Никогда не показывай PII (телефоны, имена клиентов) — только агрегаты.\n\nФормат ответа: число + 1 строка интерпретации."
+        }
+      },
+      "id": "ai-analytics",
+      "name": "Analytics Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -1180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "anthropic/claude-sonnet-4.5"
+        },
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "llm-openrouter",
+      "name": "Claude Sonnet 4.5 (OpenRouter)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1260,
+        220
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENROUTER_CRED_ID",
+          "name": "OpenRouter — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "sql_query",
+        "description": "Выполняет read-only SQL SELECT по аналитическим таблицам АвтоMind. Принимает один параметр query (строка SQL). Возвращает первые 200 строк.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_TOOL_SQL_QUERY_ID"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', 'SELECT-only SQL query') }}"
+          }
+        }
+      },
+      "id": "tool-sql",
+      "name": "Tool: sql_query",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.1,
+      "position": [
+        -1100,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "name": "search_knowledge",
+        "description": "Поиск в базе знаний (Obsidian Vault). Используй для качественных вопросов: «как у нас принято», «что в оферте», «правила работы».",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_TOOL_RAG_SEARCH_ID"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', 'natural language query') }}",
+            "top_k": "={{ 4 }}"
+          }
+        }
+      },
+      "id": "tool-rag",
+      "name": "Tool: search_knowledge",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.1,
+      "position": [
+        -940,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO metrics (workflow, metric, value, tags) VALUES ('33-analytics','question_answered',1,$1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ q: ($('When Called').item.json.question || '').slice(0, 200) }) }}"
+        }
+      },
+      "id": "pg-metric",
+      "name": "Record Metric",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -780,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Analytics Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sonnet 4.5 (OpenRouter)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analytics Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: sql_query": {
+      "ai_tool": [
+        [
+          {
+            "node": "Analytics Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: search_knowledge": {
+      "ai_tool": [
+        [
+          {
+            "node": "Analytics Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analytics Agent": {
+      "main": [
+        [
+          {
+            "node": "Record Metric",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "ai-agent"
+    },
+    {
+      "name": "analytics"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
