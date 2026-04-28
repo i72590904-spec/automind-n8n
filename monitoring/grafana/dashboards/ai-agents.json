@@ -23,7 +23,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM metrics WHERE workflow LIKE '3%-supervisor' OR workflow LIKE '2%-ai-%' OR workflow LIKE '3%-sales-manager' OR workflow LIKE '3%-tech-writer' OR workflow LIKE '3%-analytics' AND recorded_at >= NOW() - INTERVAL '24 hours';",
+          "rawSql": "SELECT COUNT(*) AS value FROM metrics WHERE (workflow LIKE '3%-supervisor' OR workflow LIKE '2%-ai-%' OR workflow LIKE '3%-sales-manager' OR workflow LIKE '3%-tech-writer' OR workflow LIKE '3%-analytics') AND recorded_at >= NOW() - INTERVAL '24 hours';",
           "rawQuery": true
         }
       ],
