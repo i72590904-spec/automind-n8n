@@ -35,17 +35,16 @@
 - [x] Migration `02-rag.sql` — pgvector extension, таблицы `notes`, `note_chunks`, `outreach_messages`, `ai_sessions`.
 - [x] Документация: `docs/06-phase4-ai-rag.md`.
 
-## Фаза 5 — Мульти-агенты с Супервайзером
+## Фаза 5 — Мульти-агенты с Супервайзером ✅
 
-- [ ] Workflow `30 — Supervisor` — главный координатор:
-  - роутинг задач на под-агентов через `Switch`/`Execute Workflow`,
-  - планирование (разбивает задачу на этапы, назначает агентов),
-  - оценка эффективности по метрикам.
-- [ ] Под-агенты:
-  - `31 — Sales Manager`
-  - `32 — Tech Writer`
-  - `33 — Analytics`
-- [ ] Договорённость: все AI-агенты при работе с Obsidian коммитят в `ai-staging`.
+- [x] Workflow `30 — Supervisor` — Telegram-агент команды с tools.
+- [x] Workflow `31 — Sales Manager` — sub-workflow квалификации лида (state-machine на стадиях first_contact → qualifying → meeting_set → won/lost).
+- [x] Workflow `32 — Tech Writer` — ежедневный отчёт в Vault через workflow 12.
+- [x] Workflow `33 — Analytics` — read-only SQL Q&A.
+- [x] Sub-workflow `34 — RAG Search` (pgvector cosine similarity, общий tool).
+- [x] Sub-workflow `35 — SQL Query` (read-only валидатор + role `automind_ro`).
+- [x] Migration `03-readonly.sql` — отдельная роль с только SELECT.
+- [x] Документация: `docs/07-supervisor-multi-agents.md`.
 
 ## Фаза 6 — Контроль и дашборд
 

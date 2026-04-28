@@ -1,0 +1,128 @@
+{
+  "name": "35 — Tool: SQL Query (read-only)",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "workflow_call"
+        ],
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "trigger-call",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Защита: разрешаем ТОЛЬКО SELECT, без точек с запятой (одно выражение).\nconst raw = ($json.query || '').toString().trim();\nif (!raw) throw new Error('query is required');\nif (raw.length > 4000) throw new Error('query too long');\n\n// Удаляем trailing semicolon если он один.\nconst q = raw.replace(/;\\s*$/, '');\n\n// Запрещаем доп. statement-ы.\nif (/;/.test(q)) throw new Error('multiple statements are not allowed');\n\n// Запрещаем небезопасные ключевые слова в начале/как самостоятельные слова.\nconst forbidden = /\\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|do|call|set\\s+role|reset)\\b/i;\nif (forbidden.test(q)) throw new Error('only read-only SELECT/WITH queries are allowed');\n\n// Должно начинаться на SELECT или WITH (CTE).\nif (!/^(select|with)\\b/i.test(q)) throw new Error('query must start with SELECT or WITH');\n\n// Принудительный LIMIT, если его нет (защита от случайного полного скана).\nlet finalQuery = q;\nif (!/\\blimit\\s+\\d+/i.test(q)) finalQuery = `${q}\\nLIMIT 200`;\n\nreturn [{ json: { safeQuery: finalQuery } }];\n"
+      },
+      "id": "code-validate",
+      "name": "Validate & Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.safeQuery }}",
+        "options": {}
+      },
+      "id": "pg-run",
+      "name": "Run Query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -960,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_READONLY_CRED_ID",
+          "name": "Postgres — automind readonly"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Сводим строки в массив объектов и обрезаем до 200.\nconst rows = $input.all().map(i => i.json).slice(0, 200);\nreturn [{ json: { rows, count: rows.length } }];\n"
+      },
+      "id": "code-format",
+      "name": "Format Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -740,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Validate & Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Limit": {
+      "main": [
+        [
+          {
+            "node": "Run Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Query": {
+      "main": [
+        [
+          {
+            "node": "Format Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "tool"
+    },
+    {
+      "name": "analytics"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

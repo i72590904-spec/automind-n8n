@@ -1,0 +1,334 @@
+{
+  "name": "31 — Sales Manager (lead qualification)",
+  "nodes": [
+    {
+      "parameters": {
+        "events": [
+          "workflow_call"
+        ],
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "lead_id",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "id": "trigger-call",
+      "name": "When Called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, source, external_id, title, niche, status, metadata\nFROM leads WHERE id = $1::int;",
+        "options": {
+          "queryReplacement": "={{ [$json.lead_id] }}"
+        }
+      },
+      "id": "pg-lead",
+      "name": "Load Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1180,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT direction, channel, text, created_at\nFROM outreach_messages WHERE lead_id = $1::int\nORDER BY created_at;",
+        "options": {
+          "queryReplacement": "={{ [$('Load Lead').item.json.id] }}"
+        }
+      },
+      "id": "pg-history",
+      "name": "Load History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -960,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Собираем контекст для AI: сам лид + история переписки.\nconst lead = $('Load Lead').item.json;\nconst history = $input.all().map(i => i.json);\nconst formattedHistory = history.length\n  ? history.map(h => `[${h.created_at}] ${h.direction === 'in' ? 'CLIENT' : 'US'}: ${h.text}`).join('\\n')\n  : '(переписки ещё нет — нужно начать)';\nreturn [{\n  json: {\n    lead_id: lead.id,\n    title: lead.title,\n    niche: lead.niche,\n    metadata: lead.metadata,\n    status: lead.status,\n    history: formattedHistory,\n  }\n}];\n"
+      },
+      "id": "code-context",
+      "name": "Build Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Лид #{{ $json.lead_id }}: {{ $json.title }}\nНиша: {{ $json.niche }}\nТекущий статус: {{ $json.status }}\nMeta: {{ JSON.stringify($json.metadata) }}\n\nИстория переписки:\n{{ $json.history }}\n\nЗадача: проанализируй где мы в playbook'е lead-qualification и определи следующий шаг.\nВерни JSON-объект с полями:\n- stage: 'first_contact' | 'qualifying' | 'meeting_set' | 'won' | 'lost'\n- pkg_recommendation: 'start' | 'base' | 'pro' | null\n- summary: краткий summary (≤ 200 символов)\n- next_message: текст следующего сообщения клиенту (или null если ничего слать не надо)\n- ready_for_meeting: true | false",
+        "options": {
+          "systemMessage": "Ты — Sales Manager АвтоMind. Работаешь по playbook'у lead-qualification.\n\nСтадии: new → first_contact → qualifying → meeting_set → meeting_done → won | lost\n\nКвалификационные вопросы (4 шт):\n1. Ниша/тип бизнеса (если ещё не ясно)\n2. Размер: сколько клиентов в месяц / какой команды размер\n3. Боль: что сейчас не автоматизировано, что отнимает время\n4. Готовность: бюджет (есть ли 30-100к), сроки (этот месяц/квартал)\n\nРекомендация пакета:\n- start (30к) — единичный салон/бар, 1 услуга, бот записи + напоминания\n- base (60к) — несколько услуг, нужна CRM, рассылки\n- pro (100к) — сеть/несколько точек, аналитика, многоканальность\n\nИспользуй tool `search_knowledge` для уточнения деталей оферты, скриптов возражений, ценообразования.\n\nЕсли в истории больше 5 наших сообщений без ответа — stage='lost'.\nЕсли клиент сам предложил встречу или явно готов платить — ready_for_meeting=true, pkg_recommendation выставь.\n\nОтвечай ТОЛЬКО валидным JSON, без обёрток ```json."
+        }
+      },
+      "id": "ai-sales",
+      "name": "Sales Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "anthropic/claude-sonnet-4.5"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "llm-openrouter",
+      "name": "Claude Sonnet 4.5 (OpenRouter)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -600,
+        220
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENROUTER_CRED_ID",
+          "name": "OpenRouter — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "search_knowledge",
+        "description": "Поиск по базе знаний АвтоMind. Используй для уточнения оферты, скриптов, ценообразования.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_TOOL_RAG_SEARCH_ID"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', 'natural language query') }}",
+            "top_k": "={{ 4 }}"
+          }
+        }
+      },
+      "id": "tool-rag",
+      "name": "Tool: search_knowledge",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.1,
+      "position": [
+        -440,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Парсим JSON-ответ AI и валидируем.\nlet decision;\ntry {\n  decision = JSON.parse($json.output);\n} catch (e) {\n  throw new Error('Sales Agent did not return valid JSON: ' + $json.output.slice(0, 200));\n}\nconst stages = ['first_contact','qualifying','meeting_set','won','lost'];\nif (!stages.includes(decision.stage)) throw new Error('invalid stage: ' + decision.stage);\nconst lead = $('Build Context').item.json;\nreturn [{ json: { ...decision, lead_id: lead.lead_id } }];\n"
+      },
+      "id": "code-parse",
+      "name": "Parse Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads\nSET status = CASE\n      WHEN $2 = 'first_contact' THEN 'contacted'\n      WHEN $2 = 'qualifying' THEN 'qualifying'\n      WHEN $2 = 'meeting_set' THEN 'meeting'\n      WHEN $2 = 'won' THEN 'won'\n      WHEN $2 = 'lost' THEN 'lost'\n      ELSE status\n    END,\n    metadata = metadata || jsonb_build_object('pkg_recommendation', $3::text, 'summary', $4::text),\n    last_action_at = NOW(),\n    updated_at = NOW()\nWHERE id = $1::int\nRETURNING id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.lead_id, $json.stage, $json.pkg_recommendation || null, $json.summary || ''] }}"
+        }
+      },
+      "id": "pg-update",
+      "name": "Update Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -80,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO metrics (workflow, metric, value, tags) VALUES ('31-sales-manager','lead_qualified',1,$1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ lead_id: $('Parse Decision').item.json.lead_id, stage: $('Parse Decision').item.json.stage, pkg: $('Parse Decision').item.json.pkg_recommendation }) }}"
+        }
+      },
+      "id": "pg-metric",
+      "name": "Record Metric",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        140,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Called": {
+      "main": [
+        [
+          {
+            "node": "Load Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Lead": {
+      "main": [
+        [
+          {
+            "node": "Load History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load History": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Sales Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sonnet 4.5 (OpenRouter)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Sales Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: search_knowledge": {
+      "ai_tool": [
+        [
+          {
+            "node": "Sales Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sales Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision": {
+      "main": [
+        [
+          {
+            "node": "Update Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Lead": {
+      "main": [
+        [
+          {
+            "node": "Record Metric",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "ai-agent"
+    },
+    {
+      "name": "sales"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
