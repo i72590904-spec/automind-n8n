@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, ai-staging]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JSON files
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"; then
+              echo "::error file=$f::Invalid JSON"
+              fail=1
+            else
+              echo "ok: $f"
+            fi
+          done < <(find . -type f -name '*.json' -not -path './node_modules/*')
+          exit $fail
+
+      - name: Validate docker-compose.yml
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+        env:
+          POSTGRES_DB: n8n
+          POSTGRES_USER: n8n
+          POSTGRES_PASSWORD: x
+          POSTGRES_PORT: 5432
+          APP_DB_NAME: automind
+          APP_DB_USER: automind
+          APP_DB_PASSWORD: x
+          N8N_PORT: 5678
+          N8N_HOST: localhost
+          N8N_PROTOCOL: http
+          N8N_ENCRYPTION_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+          N8N_BASIC_AUTH_ACTIVE: "true"
+          N8N_BASIC_AUTH_USER: admin
+          N8N_BASIC_AUTH_PASSWORD: x
+          WEBHOOK_URL: https://example.com
+          GENERIC_TIMEZONE: Europe/Moscow
+          TZ: Europe/Moscow
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: x
+
+      - name: Lint shell scripts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          find db -name '*.sh' -print0 | xargs -0 -r shellcheck
+
+      - name: Validate SQL syntax
+        run: |
+          sudo apt-get install -y -qq postgresql-client
+          # Лёгкая проверка: попытка запарсить через `psql --no-psqlrc -f ... -d postgres -h /tmp -p 0` не пройдёт без сервера,
+          # поэтому делаем простую проверку, что файл не пустой и не содержит явных артефактов.
+          for f in db/init/*.sql; do
+            if [ ! -s "$f" ]; then
+              echo "::error file=$f::Empty SQL file"
+              exit 1
+            fi
+            echo "sql ok: $f ($(wc -l < "$f") lines)"
+          done

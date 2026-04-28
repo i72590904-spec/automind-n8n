@@ -1,0 +1,165 @@
+{
+  "name": "02 — Reminder Bot (Cron → Postgres → Telegram)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 24-часовое напоминание (в окне 24h..24h15m)\nSELECT b.id              AS booking_id,\n       b.starts_at,\n       c.tg_chat_id,\n       c.full_name,\n       s.title           AS service_title,\n       '24h'             AS kind\n  FROM bookings b\n  JOIN clients  c ON c.id = b.client_id\n  JOIN services s ON s.id = b.service_id\n WHERE b.status = 'confirmed'\n   AND b.reminder_24h_sent = FALSE\n   AND b.starts_at BETWEEN NOW() + interval '24 hours'\n                       AND NOW() + interval '24 hours 15 minutes'\nUNION ALL\n-- 1-часовое напоминание (в окне 1h..1h15m)\nSELECT b.id, b.starts_at, c.tg_chat_id, c.full_name, s.title, '1h'\n  FROM bookings b\n  JOIN clients  c ON c.id = b.client_id\n  JOIN services s ON s.id = b.service_id\n WHERE b.status = 'confirmed'\n   AND b.reminder_1h_sent = FALSE\n   AND b.starts_at BETWEEN NOW() + interval '1 hour'\n                       AND NOW() + interval '1 hour 15 minutes';",
+        "options": {}
+      },
+      "id": "pg-find-due",
+      "name": "Find Due Reminders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -560,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Формируем тексты напоминаний\nreturn $input.all().map(item => {\n  const j = item.json;\n  const dt = new Date(j.starts_at);\n  const date = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });\n  const time = dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });\n  const isDay = j.kind === '24h';\n  const text = isDay\n    ? `Напоминаю: завтра ${date} в ${time} — ${j.service_title}.\\nЕсли планы изменились — отмени через /cancel.`\n    : `Через час, в ${time} — ${j.service_title}. Ждём!`;\n  return {\n    json: {\n      booking_id: j.booking_id,\n      tg_chat_id: j.tg_chat_id,\n      kind: j.kind,\n      text,\n    }\n  };\n});\n"
+      },
+      "id": "code-format",
+      "name": "Format Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.tg_chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "id": "tg-send",
+      "name": "Send Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -100,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE bookings\n   SET reminder_24h_sent = CASE WHEN $2 = '24h' THEN TRUE ELSE reminder_24h_sent END,\n       reminder_1h_sent  = CASE WHEN $2 = '1h'  THEN TRUE ELSE reminder_1h_sent  END\n WHERE id = $1;",
+        "options": {
+          "queryReplacement": "={{ $json.booking_id }}, {{ $json.kind }}"
+        }
+      },
+      "id": "pg-mark-sent",
+      "name": "Mark Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        140,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Find Due Reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Due Reminders": {
+      "main": [
+        [
+          {
+            "node": "Format Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Messages": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "reminder"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
