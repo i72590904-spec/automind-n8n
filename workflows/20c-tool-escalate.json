@@ -1,0 +1,147 @@
+{
+  "name": "20c — Tool: escalate",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-execute",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst chatId = i.chat_id || i.chatId;\nconst reason = (i.reason || '').toString().slice(0, 500) || 'AI-агент эскалировал диалог';\nif (!chatId) throw new Error('chat_id required');\nreturn [{ json: { chatId: Number(chatId), reason, ts: new Date().toISOString() } }];\n"
+      },
+      "id": "code-validate",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (chat_id, direction, channel, text, payload)\nVALUES ($1::bigint, 'system', 'telegram', $2, jsonb_build_object('escalate', true, 'reason', $2));",
+        "options": {
+          "queryReplacement": "={{ [$json.chatId, $json.reason] }}"
+        }
+      },
+      "id": "pg-mark",
+      "name": "Mark Escalation",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -560,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TEAM_TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ AI эскалировал диалог.\nClient chat: {{ $('Validate').item.json.chatId }}\nПричина: {{ $('Validate').item.json.reason }}",
+        "additionalFields": {}
+      },
+      "id": "tg-team",
+      "name": "Notify Team",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, message: 'Я передал диалог человеку, он скоро ответит.' } }];\n"
+      },
+      "id": "code-shape",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Mark Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Escalation": {
+      "main": [
+        [
+          {
+            "node": "Notify Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Team": {
+      "main": [
+        [
+          {
+            "node": "Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "ai-tool"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
