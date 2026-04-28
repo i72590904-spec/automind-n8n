@@ -27,7 +27,10 @@ GRANT USAGE  ON SCHEMA public TO automind_ro;
 GRANT SELECT ON ALL TABLES    IN SCHEMA public TO automind_ro;
 
 -- Будущие таблицы тоже получат SELECT.
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO automind_ro;
+-- Важно: ALTER DEFAULT PRIVILEGES применяется к таблицам, создаваемым ОТ ИМЕНИ
+-- указанной роли. Все наши таблицы (01-schema.sql, 02-rag.sql) создаются под
+-- ролью automind через `SET ROLE automind`, поэтому FOR ROLE automind обязателен.
+ALTER DEFAULT PRIVILEGES FOR ROLE automind IN SCHEMA public GRANT SELECT ON TABLES TO automind_ro;
 
 -- Никаких прав на изменение sequences/функций/процедур (на всякий случай явно):
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM automind_ro;

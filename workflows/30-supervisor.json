@@ -237,6 +237,32 @@
     },
     {
       "parameters": {
+        "name": "escalate",
+        "description": "Помечает что справиться сам не можешь. Принимает строку причины. Запись попадёт в metrics + уведомление команды.",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_TOOL_ESCALATE_ID"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "chat_id": "={{ $('Prepare Input').item.json.chatId }}",
+            "reason": "={{ $fromAI('reason', 'short reason why supervisor cannot handle this') }}"
+          }
+        }
+      },
+      "id": "tool-escalate",
+      "name": "Tool: escalate",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.1,
+      "position": [
+        -100,
+        220
+      ]
+    },
+    {
+      "parameters": {
         "chatId": "={{ $('Prepare Input').item.json.chatId }}",
         "text": "={{ $json.output }}",
         "additionalFields": {
@@ -373,6 +399,17 @@
       ]
     },
     "Tool: analytics": {
+      "ai_tool": [
+        [
+          {
+            "node": "Supervisor Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool: escalate": {
       "ai_tool": [
         [
           {

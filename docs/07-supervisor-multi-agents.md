@@ -47,12 +47,13 @@ docker exec -it automind-postgres psql -U postgres -d automind -c "ALTER ROLE au
 1. **Sub-workflows сначала** (чтобы получить ID):
    - 34-tool-rag-search
    - 35-tool-sql-query
-   - 12-obsidian-write-note (уже есть)
+   - 12-obsidian-write-note (уже есть из Фазы 2)
+   - 20c-tool-escalate (уже есть из Фазы 4)
 2. **Уровень-1 агенты:**
    - 31-sales-manager — открой, в `Tool: search_knowledge` подставь ID workflow 34
    - 32-tech-writer-daily-report — в `Write Note (workflow 12)` подставь ID workflow 12
    - 33-analytics — в `Tool: sql_query` подставь ID workflow 35, в `Tool: search_knowledge` — ID workflow 34
-3. **Supervisor (30):** open, и подставь ID workflows 34, 31, 32, 33 в соответствующие узлы Tool.
+3. **Supervisor (30):** открой, и подставь ID workflows 34, 31, 32, 33, 20c в узлы `Tool: search_knowledge`, `Tool: qualify_lead`, `Tool: daily_report`, `Tool: analytics`, `Tool: escalate`.
 
 После импорта: **Save → Activate** каждый workflow по очереди.
 
