@@ -1,0 +1,175 @@
+{
+  "uid": "automind-ai-agents",
+  "title": "AI Agents (АвтоMind)",
+  "tags": ["automind", "ai"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "AI-сообщения за 24h",
+      "datasource": {
+        "type": "postgres",
+        "uid": "automind-postgres-ro"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM metrics WHERE workflow LIKE '3%-supervisor' OR workflow LIKE '2%-ai-%' OR workflow LIKE '3%-sales-manager' OR workflow LIKE '3%-tech-writer' OR workflow LIKE '3%-analytics' AND recorded_at >= NOW() - INTERVAL '24 hours';",
+          "rawQuery": true
+        }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Эскалации за 24h",
+      "datasource": {
+        "type": "postgres",
+        "uid": "automind-postgres-ro"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM messages WHERE payload ? 'escalate' AND created_at >= NOW() - INTERVAL '24 hours';",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Outreach отправлено за 24h",
+      "datasource": {
+        "type": "postgres",
+        "uid": "automind-postgres-ro"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM outreach_messages WHERE direction='out' AND created_at >= NOW() - INTERVAL '24 hours';",
+          "rawQuery": true
+        }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Заметок в RAG индексе",
+      "datasource": {
+        "type": "postgres",
+        "uid": "automind-postgres-ro"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM notes WHERE indexed_at IS NOT NULL;",
+          "rawQuery": true
+        }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Метрики по workflow (count/час)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "automind-postgres-ro"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', recorded_at) AS time, workflow AS metric, COUNT(*) AS value FROM metrics WHERE $__timeFilter(recorded_at) GROUP BY 1, 2 ORDER BY 1;",
+          "rawQuery": true
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Tool calls по типу (Supervisor)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "automind-postgres-ro"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', recorded_at) AS time, metric, COUNT(*) AS value FROM metrics WHERE workflow IN ('30-supervisor','31-sales-manager','32-tech-writer','33-analytics') AND $__timeFilter(recorded_at) GROUP BY 1, 2 ORDER BY 1;",
+          "rawQuery": true
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
+    },
+    {
+      "id": 20,
+      "type": "logs",
+      "title": "n8n logs (level=error)",
+      "datasource": {
+        "type": "loki",
+        "uid": "automind-loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"n8n\"} |~ \"(?i)error\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 12 }
+    },
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Recent escalations",
+      "datasource": {
+        "type": "postgres",
+        "uid": "automind-postgres-ro"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT created_at, chat_id, payload->>'reason' AS reason FROM messages WHERE payload ? 'escalate' ORDER BY created_at DESC LIMIT 50;",
+          "rawQuery": true
+        }
+      ],
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 22 }
+    }
+  ]
+}

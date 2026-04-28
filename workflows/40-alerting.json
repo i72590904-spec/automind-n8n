@@ -1,0 +1,286 @@
+{
+  "name": "40 — Alerting (cron 15 min)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Каждые 15 мин",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH stats AS (\n  SELECT\n    -- бронирования за последние 6 часов (рабочие часы проверим уже в JS)\n    (SELECT COUNT(*) FROM bookings WHERE created_at >= NOW() - INTERVAL '6 hours') AS bookings_6h,\n    -- эскалации за 1 час\n    (SELECT COUNT(*) FROM messages WHERE payload ? 'escalate' AND created_at >= NOW() - INTERVAL '1 hour') AS escalations_1h,\n    -- индексация заметок: давно не обновлялся самый свежий чанк (RAG залип)\n    (SELECT COALESCE(EXTRACT(EPOCH FROM (NOW() - MAX(updated_at))) / 60, 9999) FROM notes) AS notes_stale_min,\n    -- лиды: за 24 часа парсер ничего не дал\n    (SELECT COUNT(*) FROM leads WHERE source='vk' AND created_at >= NOW() - INTERVAL '24 hours') AS vk_leads_24h\n)\nSELECT * FROM stats;",
+        "options": {}
+      },
+      "id": "pg-stats",
+      "name": "Collect Health Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1180,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Простые правила алертов. Возвращает {alerts: [{level, code, message}]}.\nconst s = $json;\nconst hour = new Date().getHours();\nconst alerts = [];\n\n// Бронирований нет 6 часов в рабочее время (10-21 локально).\nif (hour >= 10 && hour < 21 && Number(s.bookings_6h) === 0) {\n  alerts.push({ level: 'warn', code: 'no_bookings_6h', message: '6 часов нет ни одного нового бронирования (рабочее время).' });\n}\n\n// Эскалаций больше 5 за час → AI явно деградирует или клиенты пишут что-то странное.\nif (Number(s.escalations_1h) >= 5) {\n  alerts.push({ level: 'warn', code: 'many_escalations', message: `Эскалаций к команде за час: ${s.escalations_1h}. Проверь что AI отвечает корректно.` });\n}\n\n// RAG не обновлялся 2 часа+ → workflow 23 завалился.\nif (Number(s.notes_stale_min) >= 120) {\n  alerts.push({ level: 'warn', code: 'rag_stale', message: `Заметки не обновлялись ${Math.round(s.notes_stale_min)} минут. Проверь workflow 23-rag-sync.` });\n}\n\n// VK парсер: за сутки 0 новых лидов → токен умер или поиск пустой.\nif (Number(s.vk_leads_24h) === 0) {\n  alerts.push({ level: 'warn', code: 'no_vk_leads_24h', message: '24 часа без новых лидов из ВК. Проверь VK_ACCESS_TOKEN или workflow 21.' });\n}\n\nreturn alerts.length\n  ? alerts.map(a => ({ json: { ...a, ts: new Date().toISOString() } }))\n  : [{ json: { skip: true } }];\n"
+      },
+      "id": "code-rules",
+      "name": "Apply Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-alerts",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO metrics (workflow, metric, value, tags) VALUES ('40-alerting', $1::text, 1, $2::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.code, JSON.stringify({ level: $json.level, message: $json.message }) ] }}"
+        }
+      },
+      "id": "pg-record",
+      "name": "Record Alert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -520,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT EXISTS (\n  SELECT 1 FROM metrics\n  WHERE workflow='40-alerting' AND metric=$1::text\n    AND recorded_at >= NOW() - INTERVAL '60 minutes'\n    AND id < (SELECT MAX(id) FROM metrics WHERE workflow='40-alerting' AND metric=$1::text)\n) AS already_alerted;",
+        "options": {
+          "queryReplacement": "={{ [$('Apply Rules').item.json.code] }}"
+        }
+      },
+      "id": "pg-dedup",
+      "name": "Dedup Window (60min)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -300,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fresh",
+              "leftValue": "={{ $json.already_alerted }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-fresh",
+      "name": "Skip If Recently Alerted",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TEAM_TELEGRAM_CHAT_ID }}",
+        "text": "={{ $('Apply Rules').item.json.level === 'error' ? '🔴' : '🟡' }} АвтоMind alert: {{ $('Apply Rules').item.json.code }}\n\n{{ $('Apply Rules').item.json.message }}",
+        "additionalFields": {}
+      },
+      "id": "tg-send",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        140,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Каждые 15 мин": {
+      "main": [
+        [
+          {
+            "node": "Collect Health Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Health Metrics": {
+      "main": [
+        [
+          {
+            "node": "Apply Rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Rules": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Record Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Record Alert": {
+      "main": [
+        [
+          {
+            "node": "Dedup Window (60min)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup Window (60min)": {
+      "main": [
+        [
+          {
+            "node": "Skip If Recently Alerted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip If Recently Alerted": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "monitoring"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
