@@ -97,9 +97,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO leads (source, external_id, niche, status, metadata)\nVALUES ('vk', $1, $2, 'new', $3::jsonb)\nON CONFLICT (source, external_id) DO UPDATE\n  SET metadata = leads.metadata || EXCLUDED.metadata,\n      updated_at = NOW()\nRETURNING id, status;",
+        "query": "INSERT INTO leads (source, external_id, title, niche, status, metadata)\nVALUES ('vk', $1, $2, $3, 'new', $4::jsonb)\nON CONFLICT (source, external_id) DO UPDATE\n  SET title = EXCLUDED.title,\n      metadata = leads.metadata || EXCLUDED.metadata,\n      updated_at = NOW()\nRETURNING id, status;",
         "options": {
-          "queryReplacement": "={{ [$json.external_id, $json.niche, JSON.stringify({ title: $json.title, url: $json.url, members: $json.members, city: $json.city, description: $json.description, site: $json.site, activity: $json.activity })] }}"
+          "queryReplacement": "={{ [$json.external_id, $json.title, $json.niche, JSON.stringify({ title: $json.title, url: $json.url, members: $json.members, city: $json.city, description: $json.description, site: $json.site, activity: $json.activity })] }}"
         }
       },
       "id": "pg-upsert",

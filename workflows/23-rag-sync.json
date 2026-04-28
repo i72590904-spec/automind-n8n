@@ -120,7 +120,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH up AS (\n  INSERT INTO notes (path, content_hash, content, frontmatter, tags, updated_at)\n  VALUES ($1, $2, $3, $4::jsonb, $5::text[], NOW())\n  ON CONFLICT (path) DO UPDATE\n    SET content_hash = EXCLUDED.content_hash,\n        content = EXCLUDED.content,\n        frontmatter = EXCLUDED.frontmatter,\n        tags = EXCLUDED.tags,\n        updated_at = NOW()\n  RETURNING id, content_hash, indexed_at\n)\nSELECT id, (indexed_at IS NULL OR indexed_at < NOW() - INTERVAL '1 second') AS need_reindex FROM up;",
+        "query": "WITH old AS (\n  SELECT id, content_hash AS old_hash, indexed_at FROM notes WHERE path = $1\n),\nup AS (\n  INSERT INTO notes (path, content_hash, content, frontmatter, tags, updated_at)\n  VALUES ($1, $2, $3, $4::jsonb, $5::text[], NOW())\n  ON CONFLICT (path) DO UPDATE\n    SET content_hash = EXCLUDED.content_hash,\n        content = EXCLUDED.content,\n        frontmatter = EXCLUDED.frontmatter,\n        tags = EXCLUDED.tags,\n        updated_at = NOW()\n  RETURNING id, content_hash\n)\nSELECT up.id,\n       (old.old_hash IS NULL\n        OR old.indexed_at IS NULL\n        OR old.old_hash IS DISTINCT FROM up.content_hash) AS need_reindex\nFROM up LEFT JOIN old ON old.id = up.id;",
         "options": {
           "queryReplacement": "={{ [$json.path, $json.content_hash, $json.content, JSON.stringify($json.frontmatter), '{' + $json.tags.map(t => '\"' + t.replace(/\"/g, '\\\\\"') + '\"').join(',') + '}'] }}"
         }
