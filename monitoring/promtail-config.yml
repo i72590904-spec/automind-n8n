@@ -1,0 +1,56 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+    batchwait: 1s
+    batchsize: 1048576
+
+scrape_configs:
+  - job_name: docker_containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: name
+            values: ["automind-.+"]
+    relabel_configs:
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/?(.*)"
+        target_label: "container"
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: "stream"
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: "service"
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_project"]
+        target_label: "project"
+    pipeline_stages:
+      # Промтейл получает строки в формате Docker JSON: {"log":"...","stream":"stdout","time":"..."}
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            timestamp: time
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - output:
+          source: output
+      # Доп. парсинг для n8n строк формата `2026-04-28T10:00:00.000Z [info] {payload}`.
+      - match:
+          selector: '{service="n8n"}'
+          stages:
+            - regex:
+                expression: '(?P<level>(info|warn|error|debug))\s+(?P<msg>.*)'
+                source: output
+            - labels:
+                level:

@@ -50,8 +50,9 @@
 15. **`33-analytics.json`** — read-only Q&A по метрикам через SQL и RAG.
 16. **`34-tool-rag-search.json`** — общий sub-workflow для cosine-search по `note_chunks`.
 17. **`35-tool-sql-query.json`** — sub-workflow для безопасного read-only SQL.
+18. **`40-alerting.json`** — Cron 15 мин, проверяет аномалии (нет бронирований, много эскалаций, ошибки n8n) → Telegram.
 
-Дальше будут добавлены: дашборд (Grafana), логи (Loki), AI-trace (Opik) — см. [Дорожную карту](#дорожная-карта).
+Плюс стэк мониторинга в профиле `monitoring` docker-compose: **Loki** (логи) + **Promtail** (сборщик) + **Grafana** (дашборды). Преднастроенные дашборды: «АвтоMind Overview» и «AI Agents».
 
 ---
 
@@ -286,7 +287,8 @@ automind-n8n/
 | 3    | Git-интеграция AI-агента (ветка `ai-staging`)           | ✅ Done        |
 | 4    | AI-агент booking + парсер ВК + AI-аутрич + RAG (pgvector) | ✅ Done        |
 | 5    | Супервайзер + мульти-агенты (Sales / Analytics / Tech Writer) | ✅ Done    |
-| 6    | Логи (Loki) + дашборд (Grafana) + Opik для AI-trace     | ⏳ Следующий  |
+| 6    | Логи (Loki) + дашборд (Grafana) + Alerting              | ✅ Done       |
+| 7+   | Opik (AI-trace), CRM-интеграция, школа/контент          | ⏳ Опционально|
 
 ---
 

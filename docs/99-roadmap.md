@@ -46,13 +46,22 @@
 - [x] Migration `03-readonly.sql` — отдельная роль с только SELECT.
 - [x] Документация: `docs/07-supervisor-multi-agents.md`.
 
-## Фаза 6 — Контроль и дашборд
+## Фаза 6 — Контроль и дашборд ✅
 
-- [ ] Loki + Grafana в `docker-compose.yml`.
-- [ ] Workflow `40 — Metrics Aggregator` — пишет в таблицу `metrics`.
-- [ ] Workflow `41 — Daily Report` — каждое утро шлёт сводку в Telegram.
-- [ ] Алерты в Grafana (падение конверсии, нет лидов > N часов и т.д.).
-- [ ] (опционально) Интеграция с Opik для трассировки AI-решений.
+- [x] Loki + Promtail + Grafana в `docker-compose.yml` (профиль `monitoring`).
+- [x] Provisioning: datasources (Loki + Postgres app + Postgres readonly).
+- [x] Дашборд **АвтоMind Overview** (лиды, бронирования, воронка, конверсия по нишам).
+- [x] Дашборд **AI Agents** (метрики по workflow, эскалации, recent errors из логов n8n).
+- [x] Workflow `40 — Alerting` — cron 15 мин, 5 правил (нет бронирований 6h, много эскалаций, n8n exec errors, RAG залип, нет VK лидов 24h), дедупликация в часовом окне.
+- [x] Документация: `docs/08-monitoring.md`.
+
+## Фаза 7+ — Опционально
+
+- [ ] Opik для AI-trace (отдельный сервис, профиль `monitoring`).
+- [ ] Daily-report через Telegram бот команды (сейчас Tech Writer пишет в Vault — можно дублировать в TG).
+- [ ] CRM-интеграция (AmoCRM/Bitrix24) для синхронизации лидов.
+- [ ] Автоотправка outreach-сообщений в ВК (сейчас только драфты).
+- [ ] Школа: пайплайн контента + публикация в каналы.
 
 ---
 
