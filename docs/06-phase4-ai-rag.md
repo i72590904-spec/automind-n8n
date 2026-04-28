@@ -4,12 +4,33 @@
 
 ### Новые credentials в n8n (всё ручное, токены ты вводишь сам)
 
-| Credential          | Тип                              | Что туда положить                           |
-|---------------------|----------------------------------|-----------------------------------------------|
-| `OpenAI — АвтоMind`  | OpenAI API                       | https://platform.openai.com/api-keys          |
-| (опц.) `Anthropic`  | Anthropic                         | если хочешь Claude вместо GPT                |
-| (без credential)    | переменная окружения `VK_ACCESS_TOKEN` | сервисный токен ВК API (см. ниже)         |
-| (без credential)    | переменная окружения `TEAM_TELEGRAM_CHAT_ID` | твой личный chat_id (или группы команды) |
+| Credential                   | Тип n8n              | Base URL                              | Где взять ключ                                       |
+|------------------------------|----------------------|----------------------------------------|--------------------------------------------------------|
+| `OpenRouter — АвтоMind`      | OpenAI               | `https://openrouter.ai/api/v1`        | https://openrouter.ai/keys                            |
+| `OpenAI — embeddings`        | OpenAI               | (default `https://api.openai.com/v1`) | https://platform.openai.com/api-keys                  |
+| (без credential, в `.env`)   | env `VK_ACCESS_TOKEN` | —                                     | https://vk.com/apps?act=manage → Сервисный ключ      |
+| (без credential, в `.env`)   | env `TEAM_TELEGRAM_CHAT_ID` | —                              | `getUpdates` твоего бота                              |
+
+**Почему две credentials типа «OpenAI», а не одна:**
+- OpenRouter отдаёт OpenAI-совместимый API → штатный узел `OpenAI Chat Model` его понимает, в credential просто меняем base URL и подсовываем ключ от OpenRouter. Через него ходим в Claude Sonnet 4.5 (`anthropic/claude-sonnet-4.5`).
+- OpenRouter **не даёт endpoint для embeddings**. Поэтому workflow 23 (RAG-синк) отдельной credential ходит в OpenAI за `text-embedding-3-small`. Расход на embeddings копеечный (~$0.02 за 1М токенов).
+- Если в будущем перейдёшь на Voyage/Jina/Cohere для embeddings — поменяешь только credential workflow 23, остальное не тронется.
+
+### Как создать credential `OpenRouter — АвтоMind` в n8n
+
+1. **Settings → Credentials → New** → выбери тип **OpenAI**.
+2. Имя: `OpenRouter — АвтоMind` (точно так, чтобы JSON автоматически слинковался).
+3. **Base URL**: `https://openrouter.ai/api/v1`
+4. **API Key**: твой OpenRouter ключ (формат `sk-or-v1-...`).
+5. Save → Test (должен вернуть OK).
+
+### Как создать credential `OpenAI — embeddings`
+
+1. **Settings → Credentials → New** → тип **OpenAI**.
+2. Имя: `OpenAI — embeddings`.
+3. Base URL — оставь дефолтный (`https://api.openai.com/v1`).
+4. API Key — обычный ключ OpenAI с https://platform.openai.com/api-keys.
+5. Save → Test.
 
 ### Новые таблицы (см. `db/init/02-rag.sql`)
 

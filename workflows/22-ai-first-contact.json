@@ -64,14 +64,14 @@
         "model": {
           "__rl": true,
           "mode": "list",
-          "value": "gpt-4o-mini"
+          "value": "anthropic/claude-sonnet-4.5"
         },
         "options": {
           "temperature": 0.7
         }
       },
-      "id": "llm-openai",
-      "name": "OpenAI Chat Model",
+      "id": "llm-openrouter",
+      "name": "Claude Sonnet 4.5 (OpenRouter)",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
@@ -80,8 +80,8 @@
       ],
       "credentials": {
         "openAiApi": {
-          "id": "REPLACE_WITH_OPENAI_CRED_ID",
-          "name": "OpenAI — АвтоMind"
+          "id": "REPLACE_WITH_OPENROUTER_CRED_ID",
+          "name": "OpenRouter — АвтоMind"
         }
       }
     },
@@ -189,7 +189,7 @@
         ]
       ]
     },
-    "OpenAI Chat Model": {
+    "Claude Sonnet 4.5 (OpenRouter)": {
       "ai_languageModel": [
         [
           {
