@@ -1,0 +1,103 @@
+{
+  "name": "11 — Obsidian: Search Notes",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-execute",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OBSIDIAN_API_URL }}/search/simple/?query={{ encodeURIComponent($json.query) }}&contextLength={{ $json.contextLength || 200 }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "http-post",
+      "name": "POST /search/simple",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OBSIDIAN_CRED_ID",
+          "name": "Obsidian Local REST API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Превращаем массив результатов в плоский список с relevance-сортировкой.\nconst items = $input.first().json;\nconst arr = Array.isArray(items) ? items : (items.results || []);\nconst out = arr.map(r => ({\n  path: r.filename || r.path,\n  matches: (r.matches || []).map(m => ({\n    text: m.context || m.match || '',\n    line: m.match?.start?.line ?? null,\n  })),\n  score: r.score || 0,\n}));\nout.sort((a,b) => (b.score||0) - (a.score||0));\nreturn out.map(x => ({ json: x }));\n"
+      },
+      "id": "code-shape",
+      "name": "Shape Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "POST /search/simple",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /search/simple": {
+      "main": [
+        [
+          {
+            "node": "Shape Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "obsidian"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

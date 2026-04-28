@@ -31,12 +31,21 @@
 | Документация       | `docs/` — пошаговые инструкции по фазам                        |
 | Резервные копии    | `backups/` — туда экспортируются workflow перед изменениями    |
 
-Готовые workflow на старте:
+Готовые workflow:
 
 1. **`01-booking-bot.json`** — Telegram-бот записи (услуга → дата → время → имя/телефон → сохранение).
 2. **`02-reminder-bot.json`** — напоминания за 24 часа и за 1 час до записи.
+3. **`10-obsidian-read-note.json`** — sub-workflow: чтение заметки Obsidian по path.
+4. **`11-obsidian-search-notes.json`** — sub-workflow: simple search по Vault.
+5. **`12-obsidian-write-note.json`** — sub-workflow: запись/перезапись заметки + автоматический git commit.
+6. **`13-obsidian-git-commit.json`** — sub-workflow: коммит в ветку `ai-staging` репозитория Vault.
+7. **`20-ai-booking-helper.json`** — AI-агент на Telegram (free-text → услуга/дата/время).
+8. **`20a/20b/20c-tool-*.json`** — sub-workflow tools для AI-агента (list_services, start_booking, escalate).
+9. **`21-vk-lead-parser.json`** — Cron 6h, парсер ВК групп по нишам в таблицу `leads`.
+10. **`22-ai-first-contact.json`** — Cron 1h, AI генерирует первое сообщение → драфт в Telegram команды.
+11. **`23-rag-sync.json`** — Cron 30 мин, индексация Obsidian заметок в pgvector через OpenAI embeddings.
 
-Дальше будут добавлены: парсер ВК, AI-первый контакт, CRM-интеграция, Супервайзер, дашборд (см. [Дорожную карту](#дорожная-карта)).
+Дальше будут добавлены: Супервайзер с мульти-агентами, дашборд (см. [Дорожную карту](#дорожная-карта)).
 
 ---
 
@@ -217,7 +226,7 @@ Invoke-RestMethod "https://api.telegram.org/bot$Token/getWebhookInfo"
 automind-n8n/
 ├── .env.example                # Шаблон переменных окружения
 ├── .gitignore
-├── docker-compose.yml          # n8n + Postgres + Redis
+├── docker-compose.yml          # n8n + Postgres + Redis (+ vault mount)
 ├── README.md                   # Этот файл
 ├── db/
 │   └── init/
@@ -225,12 +234,23 @@ automind-n8n/
 │       └── 01-schema.sql       # Схема таблиц (services, bookings, ...)
 ├── workflows/
 │   ├── 01-booking-bot.json     # Telegram-бот записи
-│   └── 02-reminder-bot.json    # Напоминания за 24h и 1h
+│   ├── 02-reminder-bot.json    # Напоминания за 24h и 1h
+│   ├── 10-obsidian-read-note.json
+│   ├── 11-obsidian-search-notes.json
+│   ├── 12-obsidian-write-note.json
+│   └── 13-obsidian-git-commit.json
+├── obsidian/_AI/               # Шаблоны для копирования в твой Obsidian Vault
+│   ├── AI_System_Specs.md
+│   ├── agents/
+│   └── playbooks/
+├── vault-placeholder/          # Заглушка для docker volume, если Vault не примонтирован
 ├── backups/                    # Сюда экспортируй свои workflow перед правками
 ├── docs/
 │   ├── 01-windows-setup.md     # Подробная установка под Windows
 │   ├── 02-cloudflare-tunnel.md # Named tunnel с собственным доменом
 │   ├── 03-importing-workflows.md
+│   ├── 04-obsidian-setup.md    # Local REST API в Obsidian
+│   ├── 05-ai-staging-branch.md # Git-интеграция AI в ветку ai-staging
 │   └── 99-roadmap.md           # Полная дорожная карта по фазам
 └── .github/workflows/ci.yml    # Валидация JSON в PR-ах
 ```
@@ -255,11 +275,11 @@ automind-n8n/
 
 | Фаза | Что делаем                                              | Статус        |
 |------|---------------------------------------------------------|---------------|
-| 1    | n8n + Postgres + Telegram, бот записи и напоминания     | ✅ В этом PR  |
-| 2    | Obsidian Local REST API + структурированная база знаний | ⏳ Следующий  |
-| 3    | Git-интеграция AI-агента (ветка `ai-staging`)           | ⏳ В работе   |
-| 4    | Базовый AI-агент + RAG (Supabase pgvector)              | 📅 Планируем  |
-| 5    | Супервайзер + мульти-агенты                             | 📅 Планируем  |
+| 1    | n8n + Postgres + Telegram, бот записи и напоминания     | ✅ Done        |
+| 2    | Obsidian Local REST API + структурированная база знаний | ✅ Done        |
+| 3    | Git-интеграция AI-агента (ветка `ai-staging`)           | ✅ Done        |
+| 4    | AI-агент booking + парсер ВК + AI-аутрич + RAG (pgvector) | ✅ Done        |
+| 5    | Супервайзер + мульти-агенты                             | ⏳ Следующий  |
 | 6    | Логи (Loki) + дашборд (Grafana) + Opik для AI-trace     | 📅 Планируем  |
 
 ---

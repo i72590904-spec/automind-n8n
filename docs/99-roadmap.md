@@ -9,28 +9,31 @@
 - [x] Документация по Windows-установке и Cloudflare Tunnel
 - [x] CI: валидация JSON-файлов
 
-## Фаза 2 — Obsidian как «мозг» ⏳
+## Фаза 2 — Obsidian как «мозг» ✅
 
-- [ ] Скрипт-помощник для подключения Obsidian Local REST API.
-- [ ] Workflow `10 — Obsidian Reader` (HTTP Request → читать заметку по пути).
-- [ ] Workflow `11 — Obsidian Writer` (создавать/обновлять заметку, пушить в `ai-staging`).
-- [ ] Шаблон `AI_System_Specs.md` со всеми системными промптами.
-- [ ] Документация: как структурировать Vault для AI-команды.
+- [x] Документация по подключению Local REST API (`docs/04-obsidian-setup.md`).
+- [x] Workflow `10 — Obsidian: Read Note` — чтение по path.
+- [x] Workflow `11 — Obsidian: Search Notes` — simple search.
+- [x] Workflow `12 — Obsidian: Write Note` — запись с защитой от записи вне `_AI/inbox/`.
+- [x] Шаблоны: `obsidian/_AI/AI_System_Specs.md`, `agents/booking-helper.md`, `agents/sales-manager.md`, `playbooks/lead-qualification.md`.
+- [x] Vault примонтирован в `/vault` контейнера n8n (через `OBSIDIAN_VAULT_PATH`).
 
-## Фаза 3 — Git-интеграция AI-агента ⏳
+## Фаза 3 — Git-интеграция AI-агента ✅
 
-- [ ] Sub-workflow `git_commit` — выполняет `git add/commit/push origin ai-staging` через Execute Command.
-- [ ] Защита: AI коммитит **только** в `ai-staging`, мерж в `main` — через PR вручную.
-- [ ] CI на стороне репо: блокировать прямые пуши в `main` от bot-аккаунта.
+- [x] Sub-workflow `13 — Vault Git Commit (ai-staging)` — git add/commit/push с валидацией путей.
+- [x] AI коммитит **только** в `ai-staging` — branch захардкожен в Validate Input.
+- [x] Документация по настройке Vault как git-репо (`docs/05-ai-staging-branch.md`).
+- [x] Защита `main` — через GitHub Branch Protection (настраивается вручную).
+- [x] Метрика `commit` пишется в таблицу `metrics` после каждого пуша.
 
-## Фаза 4 — AI-команда (базовая)
+## Фаза 4 — AI-команда (базовая) ✅
 
-- [ ] Workflow `20 — AI Agent (Booking Helper)` — отвечает на свободный текст,
-  понимает «запиши на завтра в 16:00 на стрижку» через function calling.
-- [ ] Workflow `21 — VK Lead Parser` — парсит группы/паблики, складывает в `leads`.
-- [ ] Workflow `22 — AI First Contact` — пишет первое сообщение лидам.
-- [ ] Workflow `23 — RAG Sync` — Obsidian → Supabase pgvector (chunking + embeddings).
-- [ ] Документация: как добавлять нового AI-агента (шаблон).
+- [x] Workflow `20 — AI Booking Helper` + tools `20a/b/c` (list_services, start_booking, escalate).
+- [x] Workflow `21 — VK Lead Parser` (groups.search по 6 нишам, апсерт в `leads`).
+- [x] Workflow `22 — AI First Contact` (cron каждый час, AI-драфт → Telegram команды).
+- [x] Workflow `23 — RAG Sync` — Obsidian → локальный pgvector (chunking + embeddings).
+- [x] Migration `02-rag.sql` — pgvector extension, таблицы `notes`, `note_chunks`, `outreach_messages`, `ai_sessions`.
+- [x] Документация: `docs/06-phase4-ai-rag.md`.
 
 ## Фаза 5 — Мульти-агенты с Супервайзером
 

@@ -2,7 +2,10 @@ name: automind
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 — это Postgres 16 + расширение pgvector,
+    # нужно для RAG (Фаза 4). Schema-совместим с обычным postgres:16, тома можно
+    # не пересоздавать; миграция 02-rag.sql включит расширение.
+    image: pgvector/pgvector:pg16
     container_name: automind-postgres
     restart: unless-stopped
     environment:
@@ -97,12 +100,27 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
 
+      # Obsidian (Local REST API на хосте) + Vault git push (Фазы 2-3)
+      OBSIDIAN_API_URL: ${OBSIDIAN_API_URL:-http://host.docker.internal:27123}
+      VAULT_REMOTE_URL: ${VAULT_REMOTE_URL:-}
+      GH_TOKEN_VAULT: ${GH_TOKEN_VAULT:-}
+
+      # Фаза 4: AI-агенты + парсер ВК + аутрич
+      VK_ACCESS_TOKEN: ${VK_ACCESS_TOKEN:-}
+      TEAM_TELEGRAM_CHAT_ID: ${TEAM_TELEGRAM_CHAT_ID:-}
+
     volumes:
       - n8n_data:/home/node/.n8n
       - ./workflows:/workflows:ro
       - ./db:/db:ro
+      # Obsidian Vault (Фаза 3). Если переменная не задана — монтируется
+      # пустая папка-плейсхолдер из репо, чтобы compose не падал.
+      - ${OBSIDIAN_VAULT_PATH:-./vault-placeholder}:/vault
     ports:
       - "${N8N_PORT}:5678"
+    extra_hosts:
+      # На Linux нужно явно, на Docker Desktop (Windows/Mac) уже работает по умолчанию.
+      - "host.docker.internal:host-gateway"
     networks:
       - automind
 

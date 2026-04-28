@@ -1,0 +1,266 @@
+{
+  "name": "22 — AI First Contact (outreach)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Каждый час",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, source, external_id, niche, metadata\nFROM leads\nWHERE status = 'new'\n  AND source = 'vk'\n  AND created_at < NOW() - INTERVAL '30 minutes'\n  AND NOT EXISTS (\n    SELECT 1 FROM outreach_messages om\n    WHERE om.lead_id = leads.id AND om.direction='out'\n  )\nORDER BY created_at\nLIMIT 5;",
+        "options": {}
+      },
+      "id": "pg-fetch",
+      "name": "Find New Leads",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1380,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Лид:\nНиша: {{ $json.niche }}\nНазвание: {{ $json.metadata.title }}\nURL: {{ $json.metadata.url }}\nГород: {{ $json.metadata.city || 'не указан' }}\nЧисло подписчиков: {{ $json.metadata.members || 'неизвестно' }}\nОписание: {{ ($json.metadata.description || '').slice(0, 600) }}\n\nСгенерируй короткое (3-4 предложения) дружеское первое сообщение для VK от АвтоMind, из которого ясно: что мы за компания, что заметили в их группе, какую конкретную пользу можем дать. Ничего не обещай. Не упоминай скидки. Без воды.\nВерни ТОЛЬКО текст сообщения, без префиксов и кавычек.",
+        "options": {
+          "systemMessage": "Ты — AI-маркетолог АвтоMind. Пишешь короткие, ненавязчивые первые сообщения малому бизнесу в нишах салон/барбер/кафе/клиника/школа.\nТон: разговорный, на «ты»/«вы» по контексту канала (для VK — «вы»). Без давления.\nЦель: пробудить интерес и получить ответ, не продать в первом сообщении."
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Draft Message",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -1160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "anthropic/claude-sonnet-4.5"
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "llm-openrouter",
+      "name": "Claude Sonnet 4.5 (OpenRouter)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1240,
+        220
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENROUTER_CRED_ID",
+          "name": "OpenRouter — АвтоMind"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Сохраняем lead_id вместе с сгенерированным текстом для следующего узла.\nconst lead = $('Find New Leads').item.json;\nconst text = ($json.output || '').trim();\nif (!text || text.length < 30) throw new Error('AI returned too short message');\nreturn [{ json: { lead_id: lead.id, channel: 'vk', text, vk_group_id: lead.external_id } }];\n"
+      },
+      "id": "code-prepare",
+      "name": "Prepare Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -940,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO outreach_messages (lead_id, direction, channel, text, sent_by, payload)\nVALUES ($1::int, 'out', 'vk', $2, '22-ai-first-contact', jsonb_build_object('vk_group_id', $3))\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.lead_id, $json.text, $json.vk_group_id] }}"
+        }
+      },
+      "id": "pg-save-msg",
+      "name": "Save Outreach (pending)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -720,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads SET status='contacted', last_action_at=NOW(), updated_at=NOW() WHERE id=$1::int;",
+        "options": {
+          "queryReplacement": "={{ [$('Prepare Message').item.json.lead_id] }}"
+        }
+      },
+      "id": "pg-mark-contacted",
+      "name": "Mark Lead Contacted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -500,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_APP_CRED_ID",
+          "name": "Postgres — automind app"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TEAM_TELEGRAM_CHAT_ID }}",
+        "text": "=📨 Драфт первого сообщения для лида #{{ $('Prepare Message').item.json.lead_id }}\nVK: vk.com/club{{ $('Prepare Message').item.json.vk_group_id }}\n\n{{ $('Prepare Message').item.json.text }}\n\n(сообщение НЕ отправлено в VK; авто-отправка будет включена после ручной проверки нескольких драфтов)",
+        "additionalFields": {}
+      },
+      "id": "tg-notify",
+      "name": "Send Draft to Team",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -280,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Telegram Bot — АвтоMind"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Каждый час": {
+      "main": [
+        [
+          {
+            "node": "Find New Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find New Leads": {
+      "main": [
+        [
+          {
+            "node": "AI Draft Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sonnet 4.5 (OpenRouter)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Draft Message",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Draft Message": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Message": {
+      "main": [
+        [
+          {
+            "node": "Save Outreach (pending)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Outreach (pending)": {
+      "main": [
+        [
+          {
+            "node": "Mark Lead Contacted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Lead Contacted": {
+      "main": [
+        [
+          {
+            "node": "Send Draft to Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automind"
+    },
+    {
+      "name": "ai-agent"
+    },
+    {
+      "name": "outreach"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
